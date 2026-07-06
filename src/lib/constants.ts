@@ -1,4 +1,4 @@
-import type { EventStatus } from "@/generated/prisma/enums";
+import type { EventStatus, OrderStatus } from "@/generated/prisma/enums";
 
 export const EVENT_CATEGORIES = [
   "Comedia",
@@ -29,6 +29,15 @@ export const EVENT_STATUS_LABELS: Record<
   DRAFT: { label: "Borrador", variant: "default" },
   PENDING: { label: "En revisión", variant: "warning" },
   APPROVED: { label: "Aprobado", variant: "success" },
+  CANCELLED: { label: "Cancelado", variant: "danger" },
+};
+
+export const ORDER_STATUS_LABELS: Record<
+  OrderStatus,
+  { label: string; variant: "default" | "success" | "warning" | "danger" }
+> = {
+  PENDING_PAYMENT: { label: "Esperando pago", variant: "warning" },
+  CONFIRMED: { label: "Confirmado", variant: "success" },
   CANCELLED: { label: "Cancelado", variant: "danger" },
 };
 

@@ -20,6 +20,14 @@ export async function Navbar() {
             <Link href="/eventos" className="transition-colors hover:text-foreground">
               Eventos
             </Link>
+            {user && (
+              <Link
+                href="/pedidos"
+                className="transition-colors hover:text-foreground"
+              >
+                Mis pedidos
+              </Link>
+            )}
             {isOrganizer && (
               <Link
                 href="/dashboard"

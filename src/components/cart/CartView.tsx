@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { formatCurrency } from "@/lib/utils";
 import { Button, buttonVariants } from "@/components/ui/Button";
 import {
@@ -18,11 +20,47 @@ import {
 import { useHydrated } from "@/lib/use-hydrated";
 
 export function CartView() {
+  const router = useRouter();
   const hydrated = useHydrated();
   const { eventId, eventTitle, items, setZoneQuantity, removeItem, clear } =
     useCartStore();
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [checkingOut, setCheckingOut] = useState(false);
 
   const shownItems = hydrated ? items : [];
+
+  async function checkout() {
+    if (!eventId) return;
+    setCheckoutError(null);
+    setCheckingOut(true);
+
+    const response = await fetch("/api/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        eventId,
+        seatIds: items.filter((item) => item.seatId).map((item) => item.seatId),
+        zones: items
+          .filter((item) => !item.seatId)
+          .map((item) => ({ zoneId: item.zoneId, quantity: item.quantity })),
+      }),
+    });
+
+    if (response.status === 401) {
+      router.push("/login?callbackUrl=/carrito");
+      return;
+    }
+    if (!response.ok) {
+      setCheckingOut(false);
+      const data = await response.json().catch(() => null);
+      setCheckoutError(data?.error ?? "No se pudo crear el pedido");
+      return;
+    }
+
+    const data = await response.json();
+    clear();
+    router.push(`/pedidos/${data.order.id}`);
+  }
 
   if (shownItems.length === 0 || !eventId) {
     return (
@@ -168,11 +206,13 @@ export function CartView() {
       </Card>
 
       <div className="flex flex-col items-end gap-2">
-        <Button disabled size="lg">
-          Continuar al pago
+        {checkoutError && <p className="text-sm text-danger">{checkoutError}</p>}
+        <Button size="lg" onClick={checkout} disabled={checkingOut}>
+          {checkingOut ? "Creando pedido..." : "Continuar al pago"}
         </Button>
         <p className="text-xs text-muted-foreground">
-          El pago con QR y la generación de boletos llegan en la Fase 4.
+          Vas a tener 15 minutos para pagar con QR antes de que el pedido
+          expire.
         </p>
       </div>
     </div>

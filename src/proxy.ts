@@ -12,10 +12,11 @@ export default auth((request) => {
 
   const isDashboard = nextUrl.pathname.startsWith("/dashboard");
   const isAdmin = nextUrl.pathname.startsWith("/admin");
+  const isOrders = nextUrl.pathname.startsWith("/pedidos");
   const isAuthPage =
     nextUrl.pathname === "/login" || nextUrl.pathname === "/register";
 
-  if ((isDashboard || isAdmin) && !isLoggedIn) {
+  if ((isDashboard || isAdmin || isOrders) && !isLoggedIn) {
     const loginUrl = new URL("/login", nextUrl);
     loginUrl.searchParams.set("callbackUrl", nextUrl.pathname);
     return NextResponse.redirect(loginUrl);
@@ -37,5 +38,11 @@ export default auth((request) => {
 });
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/admin/:path*", "/login", "/register"],
+  matcher: [
+    "/dashboard/:path*",
+    "/admin/:path*",
+    "/pedidos/:path*",
+    "/login",
+    "/register",
+  ],
 };

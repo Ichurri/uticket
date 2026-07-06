@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { expireStaleOrders } from "@/lib/orders";
 import { buttonVariants } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
 
@@ -13,12 +14,17 @@ export default async function DashboardPage() {
   const session = await auth();
   const organizerId = session!.user.id;
 
-  const [venueCount, draftCount, pendingCount, approvedCount] =
+  await expireStaleOrders();
+
+  const [venueCount, draftCount, pendingCount, approvedCount, pendingOrders] =
     await Promise.all([
       prisma.venue.count({ where: { organizerId } }),
       prisma.event.count({ where: { organizerId, status: "DRAFT" } }),
       prisma.event.count({ where: { organizerId, status: "PENDING" } }),
       prisma.event.count({ where: { organizerId, status: "APPROVED" } }),
+      prisma.order.count({
+        where: { status: "PENDING_PAYMENT", event: { organizerId } },
+      }),
     ]);
 
   const stats = [
@@ -26,6 +32,7 @@ export default async function DashboardPage() {
     { label: "Borradores", value: draftCount },
     { label: "En revisión", value: pendingCount },
     { label: "Aprobados", value: approvedCount },
+    { label: "Pagos por confirmar", value: pendingOrders },
   ];
 
   return (
@@ -55,7 +62,7 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         {stats.map((stat) => (
           <Card key={stat.label}>
             <CardContent className="p-5">
