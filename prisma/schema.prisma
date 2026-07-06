@@ -1,0 +1,218 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  BUYER
+  ORGANIZER
+  ADMIN
+}
+
+enum EventStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  CANCELLED
+}
+
+enum SeatMapType {
+  ZONE
+  NUMBERED
+  BOTH
+}
+
+enum SeatStatus {
+  AVAILABLE
+  RESERVED
+  SOLD
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  CANCELLED
+}
+
+enum TicketStatus {
+  VALID
+  USED
+  CANCELLED
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  password      String?
+  image         String?
+  role          Role      @default(BUYER)
+  suspended     Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+  events   Event[]
+  venues   Venue[]
+  orders   Order[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Venue {
+  id          String      @id @default(cuid())
+  name        String
+  address     String
+  city        String
+  capacity    Int
+  seatMapType SeatMapType
+  organizerId String
+  createdAt   DateTime    @default(now())
+
+  organizer User    @relation(fields: [organizerId], references: [id], onDelete: Cascade)
+  zones     Zone[]
+  events    Event[]
+}
+
+model Zone {
+  id              String  @id @default(cuid())
+  name            String
+  capacity        Int
+  priceMultiplier Decimal @default(1) @db.Decimal(5, 2)
+  venueId         String
+
+  venue      Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  seats      Seat[]
+  orderItems OrderItem[]
+  tickets    Ticket[]
+}
+
+model Seat {
+  id     String     @id @default(cuid())
+  row    String
+  number Int
+  status SeatStatus @default(AVAILABLE)
+  zoneId String
+
+  zone       Zone        @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+  tickets    Ticket[]
+
+  @@unique([zoneId, row, number])
+}
+
+model Event {
+  id             String      @id @default(cuid())
+  title          String
+  description    String
+  category       String
+  date           DateTime
+  time           String
+  coverImage     String?
+  paymentQrImage String?
+  status         EventStatus @default(DRAFT)
+  price          Decimal     @db.Decimal(10, 2)
+  venueId        String
+  organizerId    String
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  venue     Venue    @relation(fields: [venueId], references: [id])
+  organizer User     @relation(fields: [organizerId], references: [id], onDelete: Cascade)
+  orders    Order[]
+  tickets   Ticket[]
+
+  @@index([status, date])
+  @@index([organizerId])
+}
+
+model Order {
+  id           String      @id @default(cuid())
+  totalAmount  Decimal     @db.Decimal(10, 2)
+  status       OrderStatus @default(PENDING_PAYMENT)
+  paymentQrUrl String?
+  buyerId      String
+  eventId      String
+  createdAt    DateTime    @default(now())
+  expiresAt    DateTime
+
+  buyer   User        @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  event   Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  items   OrderItem[]
+  tickets Ticket[]
+
+  @@index([buyerId])
+  @@index([eventId, status])
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  quantity  Int     @default(1)
+  unitPrice Decimal @db.Decimal(10, 2)
+  orderId   String
+  seatId    String?
+  zoneId    String?
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  seat  Seat? @relation(fields: [seatId], references: [id])
+  zone  Zone? @relation(fields: [zoneId], references: [id])
+}
+
+model Ticket {
+  id        String       @id @default(cuid())
+  code      String       @unique @default(uuid())
+  qrCode    String?
+  status    TicketStatus @default(VALID)
+  orderId   String
+  eventId   String
+  seatId    String?
+  zoneId    String?
+  createdAt DateTime     @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  seat  Seat? @relation(fields: [seatId], references: [id])
+  zone  Zone? @relation(fields: [zoneId], references: [id])
+
+  @@index([eventId, status])
+}
