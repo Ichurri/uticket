@@ -2,6 +2,7 @@ import Link from "next/link";
 import { auth, signOut } from "@/lib/auth";
 import { Button, buttonVariants } from "@/components/ui/Button";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
+import { CartButton } from "@/components/layout/CartButton";
 
 export async function Navbar() {
   const session = await auth();
@@ -39,6 +40,7 @@ export async function Navbar() {
         </div>
 
         <div className="flex items-center gap-2">
+          <CartButton />
           <ThemeToggle />
           {user ? (
             <>
