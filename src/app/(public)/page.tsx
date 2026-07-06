@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { prisma } from "@/lib/prisma";
 import { buttonVariants } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
+import { EventCard, type EventCardData } from "@/components/events/EventCard";
 
 const features = [
   {
@@ -23,7 +25,47 @@ const features = [
   },
 ];
 
-export default function HomePage() {
+async function getFeaturedEvents(): Promise<EventCardData[]> {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const events = await prisma.event.findMany({
+    where: { status: "APPROVED", date: { gte: startOfToday } },
+    include: {
+      venue: {
+        select: {
+          name: true,
+          city: true,
+          zones: { select: { priceMultiplier: true } },
+        },
+      },
+    },
+    orderBy: { date: "asc" },
+    take: 3,
+  });
+
+  return events.map((event) => {
+    const multipliers = event.venue.zones.map((zone) =>
+      Number(zone.priceMultiplier),
+    );
+    return {
+      id: event.id,
+      title: event.title,
+      category: event.category,
+      date: event.date,
+      time: event.time,
+      coverImage: event.coverImage,
+      venueName: event.venue.name,
+      city: event.venue.city,
+      priceFrom:
+        Number(event.price) * (multipliers.length ? Math.min(...multipliers) : 1),
+    };
+  });
+}
+
+export default async function HomePage() {
+  const featured = await getFeaturedEvents();
+
   return (
     <>
       <section className="relative overflow-hidden">
@@ -53,6 +95,25 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {featured.length > 0 && (
+        <section className="mx-auto w-full max-w-6xl px-4 pb-16">
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="text-2xl font-bold">Próximos eventos</h2>
+            <Link
+              href="/eventos"
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Ver todos →
+            </Link>
+          </div>
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {featured.map((event) => (
+              <EventCard key={event.id} event={event} />
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="mx-auto w-full max-w-6xl px-4 pb-24">
         <div className="grid gap-4 sm:grid-cols-3">

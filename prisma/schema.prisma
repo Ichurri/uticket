@@ -119,6 +119,8 @@ model Zone {
   name            String
   capacity        Int
   priceMultiplier Decimal @default(1) @db.Decimal(5, 2)
+  rows            Int?
+  seatsPerRow     Int?
   venueId         String
 
   venue      Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
