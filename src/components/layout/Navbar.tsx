@@ -3,6 +3,7 @@ import { auth, signOut } from "@/lib/auth";
 import { Button, buttonVariants } from "@/components/ui/Button";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { CartButton } from "@/components/layout/CartButton";
+import { MobileMenu } from "@/components/layout/MobileMenu";
 
 export async function Navbar() {
   const session = await auth();
@@ -51,7 +52,7 @@ export async function Navbar() {
           <CartButton />
           <ThemeToggle />
           {user ? (
-            <>
+            <div className="hidden items-center gap-2 sm:flex">
               <span className="hidden max-w-40 truncate text-sm text-muted-foreground md:inline">
                 {user.name ?? user.email}
               </span>
@@ -65,9 +66,9 @@ export async function Navbar() {
                   Cerrar sesión
                 </Button>
               </form>
-            </>
+            </div>
           ) : (
-            <>
+            <div className="hidden items-center gap-2 sm:flex">
               <Link
                 href="/login"
                 className={buttonVariants({ variant: "ghost", size: "sm" })}
@@ -80,8 +81,19 @@ export async function Navbar() {
               >
                 Registrarse
               </Link>
-            </>
+            </div>
           )}
+          <MobileMenu
+            user={
+              user
+                ? {
+                    name: user.name ?? null,
+                    email: user.email ?? null,
+                    role: user.role,
+                  }
+                : null
+            }
+          />
         </div>
       </nav>
     </header>

@@ -42,6 +42,11 @@ async function seedUsers() {
       role: "ORGANIZER" as const,
     },
     {
+      name: "Marco Productor",
+      email: "organizador2@boletavip.com",
+      role: "ORGANIZER" as const,
+    },
+    {
       name: "Bruno Comprador",
       email: "comprador@boletavip.com",
       role: "BUYER" as const,
@@ -163,9 +168,86 @@ async function seedVenueAndEvents() {
   }
 }
 
+async function seedSecondOrganizer(paymentQrImage: string) {
+  const organizer = await prisma.user.findUniqueOrThrow({
+    where: { email: "organizador2@boletavip.com" },
+  });
+
+  await prisma.venue.upsert({
+    where: { id: "seed-venue-casateatro" },
+    update: {},
+    create: {
+      id: "seed-venue-casateatro",
+      name: "Casa Teatro Santa Cruz",
+      address: "Av. Monseñor Rivero 415",
+      city: "Santa Cruz",
+      capacity: 200,
+      seatMapType: "ZONE",
+      organizerId: organizer.id,
+      zones: {
+        create: [
+          {
+            id: "seed-zone-preferencial",
+            name: "Preferencial",
+            capacity: 60,
+            priceMultiplier: 1.3,
+          },
+          {
+            id: "seed-zone-popular",
+            name: "Popular",
+            capacity: 140,
+            priceMultiplier: 1,
+          },
+        ],
+      },
+    },
+  });
+  console.log("Seeded venue Casa Teatro Santa Cruz (Preferencial 60 + Popular 140)");
+
+  const events = [
+    {
+      id: "seed-event-acustico",
+      title: "Noche Acústica: Voces del Oriente",
+      description:
+        "Un recorrido íntimo por la música boliviana contemporánea con artistas cruceños en formato acústico. Ambiente de café concert, capacidad limitada.",
+      category: "Música",
+      date: daysFromNow(21),
+      time: "20:00",
+      price: 70,
+      status: "APPROVED" as const,
+    },
+    {
+      id: "seed-event-obra",
+      title: "La Casa de los Espejos — Obra de Teatro",
+      description:
+        "Un drama familiar que explora la memoria y la identidad, dirigido por el colectivo Teatro del Sur. Funciones limitadas, elenco invitado internacional.",
+      category: "Teatro",
+      date: daysFromNow(35),
+      time: "19:30",
+      price: 55,
+      status: "APPROVED" as const,
+    },
+  ];
+
+  for (const event of events) {
+    await prisma.event.upsert({
+      where: { id: event.id },
+      update: { status: event.status },
+      create: {
+        ...event,
+        venueId: "seed-venue-casateatro",
+        organizerId: organizer.id,
+        paymentQrImage,
+      },
+    });
+    console.log(`Seeded event "${event.title}" (${event.status})`);
+  }
+}
+
 async function main() {
   await seedUsers();
   await seedVenueAndEvents();
+  await seedSecondOrganizer("/uploads/seed-payment-qr.png");
 }
 
 main()
