@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent } from "@/components/ui/Card";
 import { OrderActions } from "@/components/dashboard/OrderActions";
 import { ProofImage } from "@/components/dashboard/ProofImage";
+import { AutoRefresh } from "@/components/layout/AutoRefresh";
 
 export const metadata: Metadata = {
   title: "Pedidos",
@@ -66,11 +67,21 @@ export default async function DashboardOrdersPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-bold">Pedidos</h1>
-        <p className="mt-1 text-muted-foreground">
-          Revisá los comprobantes de pago para emitir los boletos.
-        </p>
+      <AutoRefresh intervalMs={15000} />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Pedidos</h1>
+          <p className="mt-1 text-muted-foreground">
+            Revisá los comprobantes de pago para emitir los boletos.
+          </p>
+        </div>
+        <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+          </span>
+          Actualización automática
+        </span>
       </div>
 
       <section className="flex flex-col gap-4">
