@@ -6,6 +6,8 @@ import { put } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api-auth";
 import { expireStaleOrders } from "@/lib/orders";
+import { proofSubmittedEmail, sendEmail } from "@/lib/email";
+import { formatCurrency } from "@/lib/utils";
 import { ALLOWED_IMAGE_TYPES, MAX_UPLOAD_BYTES } from "@/lib/constants";
 
 const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
@@ -27,7 +29,19 @@ export async function POST(request: Request, { params }: RouteContext) {
 
   const order = await prisma.order.findUnique({
     where: { id },
-    select: { id: true, buyerId: true, status: true },
+    select: {
+      id: true,
+      buyerId: true,
+      status: true,
+      totalAmount: true,
+      buyer: { select: { name: true, email: true } },
+      event: {
+        select: {
+          title: true,
+          organizer: { select: { name: true, email: true } },
+        },
+      },
+    },
   });
   if (!order || order.buyerId !== session.user.id) {
     return NextResponse.json({ error: "Pedido no encontrado" }, { status: 404 });
@@ -96,6 +110,20 @@ export async function POST(request: Request, { params }: RouteContext) {
       { error: "Este pedido ya no acepta comprobantes" },
       { status: 409 },
     );
+  }
+
+  // Notify the organizer on the first submission only — replacements while
+  // already in review would just spam their inbox.
+  if (order.status === "PENDING_PAYMENT") {
+    const origin = new URL(request.url).origin;
+    const { subject, html } = proofSubmittedEmail(
+      order.event.organizer.name,
+      order.buyer.name ?? order.buyer.email,
+      order.event.title,
+      formatCurrency(Number(order.totalAmount)),
+      `${origin}/dashboard/orders`,
+    );
+    await sendEmail({ to: order.event.organizer.email, subject, html });
   }
 
   return NextResponse.json({ ok: true, url }, { status: 201 });
