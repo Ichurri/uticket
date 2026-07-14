@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api-auth";
 import { eventStatusActionSchema } from "@/lib/validations/event";
+import { eventPendingReviewEmail, sendEmail } from "@/lib/email";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -46,6 +47,21 @@ export async function POST(request: Request, { params }: RouteContext) {
       where: { id },
       data: { status: "PENDING" },
     });
+
+    const admins = await prisma.user.findMany({
+      where: { role: "ADMIN", suspended: false },
+      select: { email: true },
+    });
+    const origin = new URL(request.url).origin;
+    const { subject, html } = eventPendingReviewEmail(
+      event.title,
+      session.user.name ?? null,
+      `${origin}/admin/events`,
+    );
+    await Promise.all(
+      admins.map((admin) => sendEmail({ to: admin.email, subject, html })),
+    );
+
     return NextResponse.json({ event: updated });
   }
 
