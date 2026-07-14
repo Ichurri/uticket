@@ -51,13 +51,21 @@ export function TicketCard({ ticket }: { ticket: TicketCardData }) {
         </div>
 
         {ticket.qrCode && (
-          <a
-            href={ticket.qrCode}
-            download={`boleto-${ticket.code.slice(0, 8)}.png`}
-            className="text-sm font-medium text-primary hover:underline"
-          >
-            Descargar QR
-          </a>
+          <div className="flex items-center gap-3">
+            <a
+              href={`/api/tickets/${ticket.id}/pdf`}
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Descargar PDF
+            </a>
+            <a
+              href={ticket.qrCode}
+              download={`boleto-${ticket.code.slice(0, 8)}.png`}
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Solo QR
+            </a>
+          </div>
         )}
       </CardContent>
     </Card>
