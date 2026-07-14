@@ -208,3 +208,51 @@ export function orderRejectedEmail(
     ),
   };
 }
+
+export function proofSubmittedEmail(
+  rawOrganizerName: string | null,
+  rawBuyerName: string,
+  rawEventTitle: string,
+  rawAmountLabel: string,
+  reviewUrl: string,
+) {
+  const name = rawOrganizerName ? escapeHtml(rawOrganizerName) : null;
+  const buyerName = escapeHtml(rawBuyerName);
+  const eventTitle = escapeHtml(rawEventTitle);
+  const amountLabel = escapeHtml(rawAmountLabel);
+  return {
+    subject: `Nuevo comprobante de pago para ${eventTitle}`,
+    html: layout(
+      `Hola${name ? ` ${name}` : ""}, tenés un pago por revisar`,
+      `<p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
+        <strong>${buyerName}</strong> subió el comprobante de una transferencia de
+        <strong>${amountLabel}</strong> para <strong>${eventTitle}</strong>.
+        Verificalo para emitir los boletos — mientras tanto el comprador queda
+        esperando.
+      </p>
+      ${button(reviewUrl, "Revisar comprobante")}`,
+    ),
+  };
+}
+
+export function eventPendingReviewEmail(
+  rawEventTitle: string,
+  rawOrganizerName: string | null,
+  reviewUrl: string,
+) {
+  const eventTitle = escapeHtml(rawEventTitle);
+  const organizerName = rawOrganizerName
+    ? escapeHtml(rawOrganizerName)
+    : "un organizador";
+  return {
+    subject: `Evento pendiente de revisión: ${eventTitle}`,
+    html: layout(
+      "Hay un evento esperando aprobación",
+      `<p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
+        <strong>${organizerName}</strong> envió <strong>${eventTitle}</strong> a
+        revisión. No se publica hasta que lo apruebes o rechaces.
+      </p>
+      ${button(reviewUrl, "Revisar evento")}`,
+    ),
+  };
+}
