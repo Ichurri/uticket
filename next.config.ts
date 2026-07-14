@@ -14,6 +14,23 @@ const nextConfig: NextConfig = {
   experimental: {
     staleTimes: { dynamic: 0 },
   },
+  // Baseline hardening; camera=(self) keeps the door scanner working.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          {
+            key: "Permissions-Policy",
+            value: "camera=(self), microphone=(), geolocation=()",
+          },
+        ],
+      },
+    ];
+  },
   // Legacy Spanish routes (pre-rename) — keep old shared links working
   async redirects() {
     return [
