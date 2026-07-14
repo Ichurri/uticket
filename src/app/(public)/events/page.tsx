@@ -26,6 +26,9 @@ export default async function EventsPage({
   const where: Prisma.EventWhereInput = {
     status: "APPROVED",
     date: { gte: filters.fecha ? eventDate(filters.fecha) : startOfToday },
+    ...(filters.q?.trim()
+      ? { title: { contains: filters.q.trim(), mode: "insensitive" } }
+      : {}),
     ...(filters.categoria ? { category: filters.categoria } : {}),
     ...(filters.ciudad ? { venue: { city: filters.ciudad } } : {}),
     ...(filters.precio && Number(filters.precio) > 0

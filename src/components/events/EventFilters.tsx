@@ -7,6 +7,7 @@ import { Input, Label, Select } from "@/components/ui/Input";
 import { EVENT_CATEGORIES } from "@/lib/constants";
 
 export interface EventFilterValues {
+  q?: string;
   categoria?: string;
   ciudad?: string;
   fecha?: string;
@@ -21,25 +22,32 @@ export function EventFilters({
   current: EventFilterValues;
 }) {
   const router = useRouter();
+  const [query, setQuery] = useState(current.q ?? "");
   const [categoria, setCategoria] = useState(current.categoria ?? "");
   const [ciudad, setCiudad] = useState(current.ciudad ?? "");
   const [fecha, setFecha] = useState(current.fecha ?? "");
   const [precio, setPrecio] = useState(current.precio ?? "");
 
   const hasActiveFilters =
-    current.categoria || current.ciudad || current.fecha || current.precio;
+    current.q ||
+    current.categoria ||
+    current.ciudad ||
+    current.fecha ||
+    current.precio;
 
   function applyFilters() {
     const params = new URLSearchParams();
+    if (query.trim()) params.set("q", query.trim());
     if (categoria) params.set("categoria", categoria);
     if (ciudad) params.set("ciudad", ciudad);
     if (fecha) params.set("fecha", fecha);
     if (precio) params.set("precio", precio);
-    const query = params.toString();
-    router.push(query ? `/events?${query}` : "/events");
+    const queryString = params.toString();
+    router.push(queryString ? `/events?${queryString}` : "/events");
   }
 
   function clearFilters() {
+    setQuery("");
     setCategoria("");
     setCiudad("");
     setFecha("");
@@ -48,7 +56,21 @@ export function EventFilters({
   }
 
   return (
-    <div className="grid gap-3 rounded-xl border border-border bg-card p-4 sm:grid-cols-2 lg:grid-cols-5">
+    <div className="grid gap-3 rounded-xl border border-border bg-card p-4 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="filter-query">Buscar</Label>
+        <Input
+          id="filter-query"
+          type="search"
+          placeholder="Nombre del evento"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") applyFilters();
+          }}
+        />
+      </div>
+
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="filter-category">Categoría</Label>
         <Select
