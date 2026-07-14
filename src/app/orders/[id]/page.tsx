@@ -65,6 +65,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           date: true,
           time: true,
           organizerId: true,
+          organizer: { select: { phone: true } },
           venue: { select: { name: true, city: true } },
         },
       },
@@ -83,6 +84,20 @@ export default async function OrderDetailPage({ params }: PageProps) {
 
   const statusInfo = ORDER_STATUS_LABELS[order.status];
   const total = Number(order.totalAmount);
+  const organizerPhone = order.event.organizer.phone;
+  const organizerContact = organizerPhone ? (
+    <p className="text-sm text-muted-foreground">
+      ¿Dudas con el pago? Contactá al organizador:{" "}
+      <a
+        href={`https://wa.me/${organizerPhone.replace(/\D/g, "")}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-medium text-primary hover:underline"
+      >
+        {organizerPhone}
+      </a>
+    </p>
+  ) : null;
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-4 py-10">
@@ -157,6 +172,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   QR aparecerán en esta misma página.
                 </li>
               </ol>
+              {organizerContact}
 
               <div className="border-t border-border pt-4">
                 <UploadProofForm orderId={order.id} />
@@ -194,6 +210,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 Te avisaremos por correo cuando tus boletos estén listos — no
                 hace falta que te quedes en esta página.
               </p>
+              {organizerContact}
               {order.paymentProof && (
                 <a
                   href={`/api/orders/${order.id}/proof`}
@@ -299,6 +316,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
               : "Puede haber expirado el tiempo de pago o haberse cancelado manualmente."}{" "}
             Los asientos fueron liberados; podés intentar de nuevo.
           </p>
+          {organizerContact}
           <Link
             href={`/events/${order.event.id}`}
             className={buttonVariants({ size: "sm" })}

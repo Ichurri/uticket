@@ -23,7 +23,7 @@ async function getApprovedEvent(id: string) {
   return prisma.event.findUnique({
     where: { id, status: "APPROVED" },
     include: {
-      organizer: { select: { name: true } },
+      organizer: { select: { name: true, phone: true } },
       venue: {
         include: {
           zones: {
@@ -202,6 +202,22 @@ export default async function EventDetailPage({ params }: PageProps) {
                   </p>
                 </div>
               </div>
+              {event.organizer.phone && (
+                <div className="flex items-start gap-3">
+                  <span>📞</span>
+                  <div>
+                    <p className="font-medium">Contacto del organizador</p>
+                    <a
+                      href={`https://wa.me/${event.organizer.phone.replace(/\D/g, "")}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      {event.organizer.phone}
+                    </a>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
