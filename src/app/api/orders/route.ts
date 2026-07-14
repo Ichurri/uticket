@@ -5,6 +5,7 @@ import { createOrderSchema } from "@/lib/validations/order";
 import { expireStaleOrders, ORDER_EXPIRY_MINUTES } from "@/lib/orders";
 import { getPlatformSettings } from "@/lib/settings";
 import { salesAreClosed } from "@/lib/utils";
+import { MAX_PENDING_ORDERS_PER_BUYER } from "@/lib/constants";
 import { Prisma } from "@/generated/prisma/client";
 
 class OrderError extends Error {}
@@ -41,6 +42,18 @@ export async function POST(request: Request) {
 
   // Free capacity being held by expired orders before validating availability
   await expireStaleOrders();
+
+  const pendingCount = await prisma.order.count({
+    where: { buyerId: session.user.id, status: "PENDING_PAYMENT" },
+  });
+  if (pendingCount >= MAX_PENDING_ORDERS_PER_BUYER) {
+    return NextResponse.json(
+      {
+        error: `Ya tenés ${pendingCount} pedidos esperando pago. Completá o cancelá alguno antes de crear otro.`,
+      },
+      { status: 429 },
+    );
+  }
 
   const event = await prisma.event.findUnique({
     where: { id: eventId, status: "APPROVED" },

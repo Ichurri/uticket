@@ -52,3 +52,7 @@ export const ALLOWED_IMAGE_TYPES: Record<string, string> = {
   "image/png": "png",
   "image/webp": "webp",
 };
+
+/** A buyer may hold at most this many unpaid (PENDING_PAYMENT) orders at
+ * once, so nobody can lock up an event's inventory in 15-minute cycles. */
+export const MAX_PENDING_ORDERS_PER_BUYER = 3;
