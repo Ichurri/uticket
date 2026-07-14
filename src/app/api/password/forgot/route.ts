@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { forgotPasswordSchema } from "@/lib/validations/auth";
-import { sendPasswordResetEmail } from "@/lib/verification";
+import {
+  hasRecentPasswordResetToken,
+  sendPasswordResetEmail,
+} from "@/lib/verification";
 
 /**
  * Always responds 200 with the same message so the endpoint can't be used
@@ -23,7 +26,8 @@ export async function POST(request: Request) {
   });
 
   // Google-only accounts have no password to reset; they sign in with Google
-  if (user?.password) {
+  // Cooldown is silent: a 429 here would reveal which emails are registered.
+  if (user?.password && !(await hasRecentPasswordResetToken(user.email))) {
     await sendPasswordResetEmail(
       { name: user.name, email: user.email },
       new URL(request.url).origin,

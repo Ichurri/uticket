@@ -14,6 +14,34 @@ function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
+export const EMAIL_RESEND_COOLDOWN_SECONDS = 60;
+
+/** VerificationToken has no createdAt; derive it from expires − TTL. */
+export function isWithinCooldown(
+  expires: Date,
+  ttlHours: number,
+  now = new Date(),
+  cooldownSeconds = EMAIL_RESEND_COOLDOWN_SECONDS,
+) {
+  const createdAt = expires.getTime() - ttlHours * 3_600_000;
+  return now.getTime() - createdAt < cooldownSeconds * 1000;
+}
+
+async function hasRecentToken(identifier: string, ttlHours: number) {
+  const token = await prisma.verificationToken.findFirst({
+    where: { identifier },
+  });
+  return token !== null && isWithinCooldown(token.expires, ttlHours);
+}
+
+export function hasRecentVerificationToken(email: string) {
+  return hasRecentToken(email, VERIFICATION_TOKEN_TTL_HOURS);
+}
+
+export function hasRecentPasswordResetToken(email: string) {
+  return hasRecentToken(`${RESET_PREFIX}${email}`, PASSWORD_RESET_TTL_HOURS);
+}
+
 /** Creates a fresh token for the email (invalidating previous ones) and sends the link. */
 export async function sendVerificationEmail(
   user: { name: string | null; email: string },

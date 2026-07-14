@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api-auth";
-import { sendVerificationEmail } from "@/lib/verification";
+import {
+  hasRecentVerificationToken,
+  sendVerificationEmail,
+} from "@/lib/verification";
 
 export async function POST(request: Request) {
   const { session, error } = await requireRole("BUYER", "ORGANIZER", "ADMIN");
@@ -18,6 +21,13 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: "Tu correo ya está verificado" },
       { status: 409 },
+    );
+  }
+
+  if (await hasRecentVerificationToken(user.email)) {
+    return NextResponse.json(
+      { error: "Ya te enviamos un correo hace un momento. Esperá un minuto e intentá de nuevo." },
+      { status: 429 },
     );
   }
 
