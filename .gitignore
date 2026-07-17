@@ -53,3 +53,6 @@ next-env.d.ts
 
 # claude
 .claude/
+
+# graphify (generated knowledge graph)
+/graphify-out/
