@@ -60,20 +60,27 @@ export function ScannerVerdict({
       </span>
 
       {accepted ? (
-        <div className="mt-2 h-1 w-48 overflow-hidden rounded-full bg-white/25">
-          <div
-            className={cn(
-              "h-full rounded-full bg-white ease-linear motion-reduce:transition-none",
-              draining ? "w-0" : "w-full",
-            )}
-            style={{ transition: `width ${AUTO_DISMISS_MS}ms linear` }}
-          />
-        </div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="mt-2 flex cursor-pointer flex-col items-center gap-1.5"
+        >
+          <span className="h-1 w-48 overflow-hidden rounded-full bg-white/25">
+            <span
+              className={cn(
+                "block h-full rounded-full bg-white ease-linear motion-reduce:transition-none",
+                draining ? "w-0" : "w-full",
+              )}
+              style={{ transition: `width ${AUTO_DISMISS_MS}ms linear` }}
+            />
+          </span>
+          <span className="text-xs text-white/70">Tocá para seguir ya</span>
+        </button>
       ) : (
         <Button
           type="button"
           size="lg"
-          className="mt-2 bg-white text-danger hover:bg-white/90"
+          className="mt-2 h-[52px] bg-white text-danger hover:bg-white/90"
           onClick={onDismiss}
         >
           Escanear otro

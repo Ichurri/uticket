@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/Button";
@@ -16,6 +17,7 @@ export function RegisterForm() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -106,6 +108,7 @@ export function RegisterForm() {
           name="password"
           placeholder="Mínimo 8 caracteres"
           autoComplete="new-password"
+          defaultVisible
           required
         />
         <FieldError message={fieldErrors.password} />
@@ -120,9 +123,30 @@ export function RegisterForm() {
         Quiero organizar y vender mis propios eventos
       </label>
 
+      <label className="flex items-start gap-2 text-sm text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={termsAccepted}
+          onChange={(e) => setTermsAccepted(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-border accent-[var(--primary)]"
+        />
+        Acepto los{" "}
+        <Link href="/terms" target="_blank" className="font-medium text-primary hover:underline">
+          Términos
+        </Link>{" "}
+        y la{" "}
+        <Link href="/privacy" target="_blank" className="font-medium text-primary hover:underline">
+          Política de Privacidad
+        </Link>
+      </label>
+
       {formError && <p className="text-sm text-danger">{formError}</p>}
 
-      <Button type="submit" disabled={loading} className="w-full">
+      <Button
+        type="submit"
+        disabled={loading || !termsAccepted}
+        className="w-full"
+      >
         {loading ? "Creando cuenta..." : "Crear cuenta"}
       </Button>
     </form>

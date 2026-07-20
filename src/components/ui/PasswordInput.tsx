@@ -8,9 +8,14 @@ import { EyeIcon, EyeOffIcon, LockIcon } from "@/components/ui/icons";
 /* Password field with a lock icon and a show/hide toggle (spec #9b). */
 export function PasswordInput({
   className,
+  defaultVisible = false,
   ...props
-}: Omit<ComponentProps<"input">, "type" | "leftIcon">) {
-  const [visible, setVisible] = useState(false);
+}: Omit<ComponentProps<"input">, "type" | "leftIcon"> & {
+  /** Registration starts visible, to cut down on mistyped passwords
+   * (spec #9d) — everywhere else it starts hidden. */
+  defaultVisible?: boolean;
+}) {
+  const [visible, setVisible] = useState(defaultVisible);
 
   return (
     <div className="relative">

@@ -36,7 +36,10 @@ export function ReviewQueue({
       <div className="flex items-center justify-between gap-2 bg-gold-soft px-4 py-3 sm:px-5">
         <div className="flex items-center gap-2">
           <HourglassIcon className="h-4 w-4 text-gold" />
-          <h2 className="font-mono text-xs font-bold uppercase tracking-[0.08em] text-gold">
+          <h2
+            aria-live="polite"
+            className="font-mono text-xs font-bold uppercase tracking-[0.08em] text-gold"
+          >
             Comprobantes por revisar · {totalCount}
           </h2>
         </div>

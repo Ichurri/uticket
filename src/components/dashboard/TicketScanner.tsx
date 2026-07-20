@@ -76,7 +76,21 @@ function reasonFor(outcome: VerifyOutcome) {
   return outcome.error ?? REJECTION_REASONS[outcome.result];
 }
 
-export function TicketScanner({ scanCode }: { scanCode?: string } = {}) {
+interface DoorCounts {
+  inside: number;
+  upcoming: number;
+}
+
+export function TicketScanner({
+  scanCode,
+  initialCounts,
+}: {
+  scanCode?: string;
+  /** Only meaningful when the scanner is scoped to one event (the public
+   * /scan/[code] door station) — omitted on the multi-event dashboard
+   * scanner, where there's no single event to count against. */
+  initialCounts?: DoorCounts;
+} = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -95,6 +109,8 @@ export function TicketScanner({ scanCode }: { scanCode?: string } = {}) {
   const [outcome, setOutcome] = useState<VerifyOutcome | null>(null);
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [detectFlash, setDetectFlash] = useState(false);
+  const [counts, setCounts] = useState(initialCounts);
 
   const dismissOutcome = useCallback(() => {
     outcomeRef.current = null;
@@ -151,6 +167,11 @@ export function TicketScanner({ scanCode }: { scanCode?: string } = {}) {
       const ok = result.result === "ACCEPTED";
       vibrate(ok);
       playTone(ok);
+      if (ok) {
+        setCounts((c) =>
+          c ? { inside: c.inside + 1, upcoming: Math.max(0, c.upcoming - 1) } : c,
+        );
+      }
       outcomeRef.current = result;
       setOutcome(result);
     } catch {
@@ -240,6 +261,8 @@ export function TicketScanner({ scanCode }: { scanCode?: string } = {}) {
           ) {
             return;
           }
+          setDetectFlash(true);
+          setTimeout(() => setDetectFlash(false), 120);
           verify(code);
         }
       }, SCAN_INTERVAL_MS);
@@ -284,6 +307,28 @@ export function TicketScanner({ scanCode }: { scanCode?: string } = {}) {
       className="dark relative flex flex-col gap-6 rounded-2xl p-4 text-foreground sm:p-6"
       style={{ backgroundImage: "var(--ticket-surface)" }}
     >
+      {counts && (
+        <div className="flex items-center justify-center gap-8">
+          <div className="flex flex-col items-center">
+            <span className="font-mono text-2xl font-extrabold tabular-nums text-white">
+              {counts.inside}
+            </span>
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-white/60">
+              Adentro
+            </span>
+          </div>
+          <div className="h-8 w-px bg-white/15" />
+          <div className="flex flex-col items-center">
+            <span className="font-mono text-2xl font-extrabold tabular-nums text-white">
+              {counts.upcoming}
+            </span>
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-white/60">
+              Por llegar
+            </span>
+          </div>
+        </div>
+      )}
+
       <Card className="border-white/10 bg-transparent shadow-none">
         <CardContent className="flex flex-col gap-4 p-0">
           <div className="relative overflow-hidden rounded-xl border border-white/10 bg-black">
@@ -308,7 +353,14 @@ export function TicketScanner({ scanCode }: { scanCode?: string } = {}) {
             )}
             {cameraActive && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <div className="h-48 w-48 rounded-xl border-2 border-white/70 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
+                <div
+                  className={cn(
+                    "relative h-48 w-48 overflow-hidden rounded-xl border-2 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)] transition-colors duration-100",
+                    detectFlash ? "border-primary" : "border-white/70",
+                  )}
+                >
+                  <div className="animate-scan-line absolute inset-x-0 h-0.5 bg-primary/80 shadow-[0_0_8px_2px_rgba(109,43,255,0.6)]" />
+                </div>
               </div>
             )}
             {torchSupported && (

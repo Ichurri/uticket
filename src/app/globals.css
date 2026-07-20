@@ -214,6 +214,21 @@ body {
   }
 }
 
+/* Scanner viewfinder scan-line (spec #7b), 2s loop. */
+@utility animate-scan-line {
+  animation: scan-line 2s ease-in-out infinite;
+}
+
+@keyframes scan-line {
+  0%,
+  100% {
+    top: 6%;
+  }
+  50% {
+    top: 94%;
+  }
+}
+
 /* "Tu selección" border flash on change (spec #3d). Triggered by remounting
    this span via a `key` tied to the selection, not by effect-driven state,
    so it needs no manual reduced-motion guard beyond the global block below. */

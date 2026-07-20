@@ -3,7 +3,7 @@ import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { expireStaleOrders } from "@/lib/orders";
-import { formatCurrency, formatDate, BOLIVIA_TZ } from "@/lib/utils";
+import { cn, formatCurrency, formatDate, BOLIVIA_TZ } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/Button";
 import {
   Card,
@@ -20,8 +20,9 @@ export const metadata: Metadata = {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Buckets a list of dates into the last 7 calendar days (Bolivia time). */
-function bucketLast7Days(dates: Date[]) {
+/** Buckets confirmed-order revenue into the last 7 calendar days (Bolivia
+ * time) for the sales chart. The last bucket (today) is labeled "HOY". */
+function bucketLast7Days(orders: { createdAt: Date; totalAmount: number }[]) {
   const dayKeyFormatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: BOLIVIA_TZ,
   });
@@ -35,15 +36,15 @@ function bucketLast7Days(dates: Date[]) {
     const date = new Date(now.getTime() - (6 - i) * DAY_MS);
     return {
       key: dayKeyFormatter.format(date),
-      label: labelFormatter.format(date).replace(/\.$/, ""),
+      label: i === 6 ? "HOY" : labelFormatter.format(date).replace(/\.$/, ""),
       value: 0,
     };
   });
 
   const byKey = new Map(days.map((day) => [day.key, day]));
-  for (const date of dates) {
-    const bucket = byKey.get(dayKeyFormatter.format(date));
-    if (bucket) bucket.value += 1;
+  for (const order of orders) {
+    const bucket = byKey.get(dayKeyFormatter.format(order.createdAt));
+    if (bucket) bucket.value += order.totalAmount;
   }
   return days.map(({ label, value }) => ({ label, value }));
 }
@@ -53,9 +54,12 @@ export default async function DashboardPage() {
   const organizerId = session!.user.id;
   await expireStaleOrders();
 
-  const startOfToday = new Date();
+  const now = new Date();
+  const startOfToday = new Date(now.getTime());
   startOfToday.setHours(0, 0, 0, 0);
   const sevenDaysAgo = new Date(startOfToday.getTime() - 6 * DAY_MS);
+  const fourteenDaysAgo = new Date(startOfToday.getTime() - 13 * DAY_MS);
+  const thirtyMinAgo = new Date(now.getTime() - 30 * 60_000);
 
   const [
     venueCount,
@@ -68,6 +72,9 @@ export default async function DashboardPage() {
     reviewOrdersCount,
     reviewOrders,
     recentConfirmed,
+    previousWeekRevenueAgg,
+    ticketsSoldThisWeek,
+    oldReviewCount,
   ] = await Promise.all([
     prisma.venue.count({ where: { organizerId } }),
     prisma.event.count({ where: { organizerId, status: "PENDING" } }),
@@ -128,7 +135,29 @@ export default async function DashboardPage() {
         event: { organizerId },
         createdAt: { gte: sevenDaysAgo },
       },
-      select: { createdAt: true },
+      select: { createdAt: true, totalAmount: true },
+    }),
+    prisma.order.aggregate({
+      _sum: { totalAmount: true },
+      where: {
+        status: "CONFIRMED",
+        event: { organizerId },
+        createdAt: { gte: fourteenDaysAgo, lt: sevenDaysAgo },
+      },
+    }),
+    prisma.ticket.count({
+      where: {
+        status: { not: "CANCELLED" },
+        event: { organizerId },
+        createdAt: { gte: sevenDaysAgo },
+      },
+    }),
+    prisma.order.count({
+      where: {
+        status: "PAYMENT_SUBMITTED",
+        event: { organizerId },
+        paymentSubmittedAt: { lte: thirtyMinAgo },
+      },
     }),
   ]);
 
@@ -147,20 +176,79 @@ export default async function DashboardPage() {
     }
   }
 
-  const stats = [
+  const thisWeekRevenue = recentConfirmed.reduce(
+    (sum, order) => sum + Number(order.totalAmount),
+    0,
+  );
+  const lastWeekRevenue = Number(previousWeekRevenueAgg._sum.totalAmount ?? 0);
+  const revenueChangePercent =
+    lastWeekRevenue > 0
+      ? Math.round(
+          ((thisWeekRevenue - lastWeekRevenue) / lastWeekRevenue) * 100,
+        )
+      : null;
+
+  const nextEvent = approvedEvents.find(
+    (event) => event.date.getTime() >= startOfToday.getTime(),
+  );
+  const daysUntilNext = nextEvent
+    ? Math.round((nextEvent.date.getTime() - startOfToday.getTime()) / DAY_MS)
+    : null;
+
+  const stats: {
+    label: string;
+    value: string;
+    sub?: { text: string; tone?: "success" | "warning" };
+  }[] = [
     {
       label: "Ingresos confirmados",
       value: formatCurrency(Number(revenueAggregate._sum.totalAmount ?? 0)),
+      sub:
+        revenueChangePercent === null
+          ? undefined
+          : {
+              text: `${revenueChangePercent >= 0 ? "▲" : "▼"} ${Math.abs(revenueChangePercent)}% vs. semana pasada`,
+              tone: revenueChangePercent >= 0 ? "success" : undefined,
+            },
     },
-    { label: "Boletos vendidos", value: String(ticketsSold) },
-    { label: "Eventos activos", value: String(activeEventCount) },
-    { label: "Pagos por confirmar", value: String(pendingOrders) },
+    {
+      label: "Boletos vendidos",
+      value: String(ticketsSold),
+      sub:
+        ticketsSoldThisWeek > 0
+          ? { text: `▲ ${ticketsSoldThisWeek} esta semana`, tone: "success" }
+          : undefined,
+    },
+    {
+      label: "Eventos activos",
+      value: String(activeEventCount),
+      sub:
+        daysUntilNext === null
+          ? undefined
+          : {
+              text:
+                daysUntilNext === 0
+                  ? "Próximo: hoy"
+                  : `Próximo: en ${daysUntilNext} día${daysUntilNext === 1 ? "" : "s"}`,
+            },
+    },
+    {
+      label: "Pagos por confirmar",
+      value: String(pendingOrders),
+      sub:
+        oldReviewCount > 0
+          ? { text: `${oldReviewCount} esperando hace +30 min`, tone: "warning" }
+          : undefined,
+    },
     { label: "Eventos en revisión", value: String(pendingReviewCount) },
     { label: "Venues", value: String(venueCount) },
   ];
 
   const dailyConfirmed = bucketLast7Days(
-    recentConfirmed.map((order) => order.createdAt),
+    recentConfirmed.map((order) => ({
+      createdAt: order.createdAt,
+      totalAmount: Number(order.totalAmount),
+    })),
   );
 
   return (
@@ -211,6 +299,20 @@ export default async function DashboardPage() {
               >
                 {stat.value}
               </p>
+              {stat.sub && (
+                <span
+                  className={cn(
+                    "text-xs",
+                    stat.sub.tone === "success"
+                      ? "text-success"
+                      : stat.sub.tone === "warning"
+                        ? "text-warning"
+                        : "text-muted-foreground",
+                  )}
+                >
+                  {stat.sub.text}
+                </span>
+              )}
             </CardContent>
           </Card>
         ))}
@@ -218,7 +320,7 @@ export default async function DashboardPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Pedidos confirmados · últimos 7 días</CardTitle>
+          <CardTitle>Ventas · últimos 7 días</CardTitle>
         </CardHeader>
         <CardContent>
           <MiniBarChart data={dailyConfirmed} />

@@ -71,6 +71,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           date: true,
           time: true,
           category: true,
+          status: true,
           organizerId: true,
           organizer: { select: { phone: true } },
           venue: { select: { name: true, city: true } },
@@ -383,17 +384,31 @@ export default async function OrderDetailPage({ params }: PageProps) {
           <p className="font-medium">Este pedido fue cancelado</p>
           <p className="max-w-sm text-sm text-muted-foreground">
             {order.rejectionReason
-              ? `El organizador rechazó el comprobante. Motivo: ${order.rejectionReason}`
-              : "Puede haber expirado el tiempo de pago o haberse cancelado manualmente."}{" "}
-            Los asientos fueron liberados; podés intentar de nuevo.
+              ? `Tu comprobante no pudo verificarse. Motivo: ${order.rejectionReason} Los asientos fueron liberados; podés intentar de nuevo.`
+              : order.event.status === "CANCELLED"
+                ? "El organizador canceló este evento. Contactalo para coordinar la devolución de tu pago."
+                : "No recibimos el pago a tiempo o cancelaste el pedido. Los asientos volvieron a estar disponibles; podés intentar de nuevo."}
           </p>
           {organizerContact}
-          <Link
-            href={`/events/${order.event.id}`}
-            className={buttonVariants({ size: "sm" })}
-          >
-            Volver a intentar
-          </Link>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {order.event.status !== "CANCELLED" && (
+              <Link
+                href={`/events/${order.event.id}`}
+                className={buttonVariants({ size: "sm" })}
+              >
+                Volver a intentar
+              </Link>
+            )}
+            <Link
+              href="/events"
+              className={buttonVariants({
+                variant: order.event.status === "CANCELLED" ? "primary" : "outline",
+                size: "sm",
+              })}
+            >
+              Ver otros eventos
+            </Link>
+          </div>
         </div>
       )}
     </div>

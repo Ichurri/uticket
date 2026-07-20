@@ -14,9 +14,14 @@ export default async function ScanPage({
   const { code } = await params;
   const event = await prisma.event.findUnique({
     where: { scanCode: code },
-    select: { title: true, date: true, time: true, status: true },
+    select: { id: true, title: true, date: true, time: true, status: true },
   });
   if (!event || event.status !== "APPROVED") notFound();
+
+  const [inside, upcoming] = await Promise.all([
+    prisma.ticket.count({ where: { eventId: event.id, status: "USED" } }),
+    prisma.ticket.count({ where: { eventId: event.id, status: "VALID" } }),
+  ]);
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col gap-6 px-4 py-10">
@@ -29,7 +34,7 @@ export default async function ScanPage({
           Escaneá el QR de cada boleto. Cada uno se acepta una sola vez.
         </p>
       </div>
-      <TicketScanner scanCode={code} />
+      <TicketScanner scanCode={code} initialCounts={{ inside, upcoming }} />
     </div>
   );
 }
