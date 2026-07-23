@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { EVENT_STATUS_LABELS } from "@/lib/constants";
+import { buttonVariants } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent } from "@/components/ui/Card";
-import { CheckIcon } from "@/components/ui/icons";
+import { EyeIcon, TicketIcon } from "@/components/ui/icons";
 import { EventReviewActions } from "@/components/admin/EventReviewActions";
 
 export const metadata: Metadata = {
@@ -42,56 +44,197 @@ export default async function AdminEventsPage() {
             </CardContent>
           </Card>
         ) : (
-          pending.map((event) => (
-            <Card key={event.id}>
-              <CardContent className="flex flex-wrap items-center justify-between gap-4 p-6">
-                <div className="min-w-0">
-                  <h3 className="font-semibold">{event.title}</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {event.category} · {formatDate(event.date)} · {event.time}{" "}
-                    hrs · {event.venue.name} ({event.venue.city}) · Desde{" "}
-                    {formatCurrency(Number(event.price))}
+          <>
+            <div className="flex flex-col gap-3 md:hidden">
+              {pending.map((event) => (
+                <Card key={event.id} className="p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="min-w-0 truncate font-semibold">
+                      {event.title}
+                    </h3>
+                    <Badge>{event.category}</Badge>
+                  </div>
+                  <p className="mt-1.5 text-sm text-muted-foreground">
+                    {formatDate(event.date)} · {event.time} hrs
                   </p>
-                  <p className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-                    Organiza: {event.organizer.name ?? event.organizer.email}
-                    {event.paymentQrImage && (
-                      <span className="inline-flex items-center gap-1 text-success">
-                        · <CheckIcon className="h-3 w-3" /> QR de pago cargado
-                      </span>
-                    )}
+                  <p className="truncate text-sm text-muted-foreground">
+                    {event.venue.name} ({event.venue.city})
                   </p>
-                </div>
-                <EventReviewActions eventId={event.id} />
-              </CardContent>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border-soft pt-3">
+                    <Link
+                      href={`/admin/events/${event.id}`}
+                      className={buttonVariants({
+                        variant: "ghost",
+                        size: "sm",
+                        className: "gap-1.5",
+                      })}
+                    >
+                      <EyeIcon className="h-4 w-4" /> Ver más
+                    </Link>
+                    <EventReviewActions eventId={event.id} />
+                  </div>
+                </Card>
+              ))}
+            </div>
+
+            <Card className="hidden overflow-hidden p-0 md:block">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[860px] border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                      <th className="whitespace-nowrap px-5 py-3 font-medium">Nombre del evento</th>
+                      <th className="w-px whitespace-nowrap px-5 py-3 font-medium">Tipo de evento</th>
+                      <th className="w-px whitespace-nowrap px-5 py-3 font-medium">Fecha y hora</th>
+                      <th className="w-px whitespace-nowrap px-5 py-3 font-medium">Lugar</th>
+                      <th className="w-px whitespace-nowrap px-5 py-3 text-center font-medium">Ver más</th>
+                      <th className="w-px whitespace-nowrap px-5 py-3 font-medium">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border-soft">
+                    {pending.map((event) => (
+                      <tr key={event.id} className="hover:bg-muted/40">
+                        <td className="whitespace-nowrap px-5 py-3 font-semibold">
+                          {event.title}
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-3 text-muted-foreground">
+                          {event.category}
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-3 text-muted-foreground">
+                          {formatDate(event.date)} · {event.time} hrs
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-3 text-muted-foreground">
+                          {event.venue.name} ({event.venue.city})
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-3 text-center">
+                          <Link
+                            href={`/admin/events/${event.id}`}
+                            aria-label="Ver más"
+                            title="Ver más"
+                            className={buttonVariants({
+                              variant: "ghost",
+                              size: "sm",
+                              className: "w-9 px-0",
+                            })}
+                          >
+                            <EyeIcon className="h-4 w-4" />
+                          </Link>
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-3">
+                          <EventReviewActions eventId={event.id} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </Card>
-          ))
+          </>
         )}
       </section>
 
       <section className="flex flex-col gap-4">
         <h2 className="font-semibold">Todos los eventos ({rest.length})</h2>
-        {rest.map((event) => {
-          const statusInfo = EVENT_STATUS_LABELS[event.status];
-          return (
-            <Card key={event.id}>
-              <CardContent className="flex flex-wrap items-center justify-between gap-4 p-6">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-semibold">{event.title}</h3>
-                    <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {formatDate(event.date)} · {event.venue.name} (
-                    {event.venue.city}) · Organiza:{" "}
-                    {event.organizer.name ?? event.organizer.email} ·{" "}
-                    {event._count.orders} pedido
-                    {event._count.orders === 1 ? "" : "s"}
-                  </p>
-                </div>
-              </CardContent>
+        {rest.length > 0 && (
+          <>
+            <div className="flex flex-col gap-3 md:hidden">
+              {rest.map((event) => {
+                const statusInfo = EVENT_STATUS_LABELS[event.status];
+                return (
+                  <Card key={event.id} className="p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="min-w-0 truncate font-semibold">
+                        {event.title}
+                      </h3>
+                      <Badge variant={statusInfo.variant}>
+                        {statusInfo.label}
+                      </Badge>
+                    </div>
+                    <p className="mt-1.5 text-sm text-muted-foreground">
+                      {formatDate(event.date)}
+                    </p>
+                    <p className="truncate text-sm text-muted-foreground">
+                      {event.venue.name} ({event.venue.city})
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border-soft pt-3">
+                      <Link
+                        href={`/dashboard/events/${event.id}/buyers`}
+                        className={buttonVariants({
+                          variant: "ghost",
+                          size: "sm",
+                          className: "gap-1.5",
+                        })}
+                      >
+                        <TicketIcon className="h-4 w-4" /> Ver estadísticas
+                      </Link>
+                      <span className="text-xs text-muted-foreground">
+                        {event._count.orders} pedido
+                        {event._count.orders === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+
+            <Card className="hidden overflow-hidden p-0 md:block">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[820px] border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                      <th className="whitespace-nowrap px-5 py-3 font-medium">Nombre del evento</th>
+                      <th className="w-px whitespace-nowrap px-5 py-3 font-medium">Estado</th>
+                      <th className="w-px whitespace-nowrap px-5 py-3 font-medium">Fecha</th>
+                      <th className="w-px whitespace-nowrap px-5 py-3 font-medium">Lugar</th>
+                      <th className="w-px whitespace-nowrap px-5 py-3 text-center font-medium">Ver estadísticas</th>
+                      <th className="w-px whitespace-nowrap px-5 py-3 font-medium">Pedidos</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border-soft">
+                    {rest.map((event) => {
+                      const statusInfo = EVENT_STATUS_LABELS[event.status];
+                      return (
+                        <tr key={event.id} className="hover:bg-muted/40">
+                          <td className="whitespace-nowrap px-5 py-3 font-semibold">
+                            {event.title}
+                          </td>
+                          <td className="whitespace-nowrap px-5 py-3">
+                            <Badge variant={statusInfo.variant}>
+                              {statusInfo.label}
+                            </Badge>
+                          </td>
+                          <td className="whitespace-nowrap px-5 py-3 text-muted-foreground">
+                            {formatDate(event.date)}
+                          </td>
+                          <td className="whitespace-nowrap px-5 py-3 text-muted-foreground">
+                            {event.venue.name} ({event.venue.city})
+                          </td>
+                          <td className="whitespace-nowrap px-5 py-3 text-center">
+                            <Link
+                              href={`/dashboard/events/${event.id}/buyers`}
+                              aria-label="Ver estadísticas"
+                              title="Ver estadísticas"
+                              className={buttonVariants({
+                                variant: "ghost",
+                                size: "sm",
+                                className: "w-9 px-0",
+                              })}
+                            >
+                              <TicketIcon className="h-4 w-4" />
+                            </Link>
+                          </td>
+                          <td className="whitespace-nowrap px-5 py-3 text-muted-foreground">
+                            {event._count.orders} pedido
+                            {event._count.orders === 1 ? "" : "s"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </Card>
-          );
-        })}
+          </>
+        )}
       </section>
     </div>
   );

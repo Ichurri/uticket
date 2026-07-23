@@ -34,8 +34,8 @@ export function EventReviewActions({ eventId }: { eventId: string }) {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <div className="flex items-center gap-2">
+    <div className="flex flex-col items-start gap-1">
+      <div className="flex flex-nowrap items-center gap-2">
         <Button
           size="sm"
           disabled={loading !== null}
