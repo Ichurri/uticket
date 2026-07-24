@@ -324,7 +324,7 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr] lg:items-start">
-        <div id="comprobantes-queue">
+        <div id="comprobantes-queue" className="min-w-0">
           <ReviewQueue
             orders={reviewOrders.map((order) => ({
               ...order,
@@ -334,7 +334,7 @@ export default async function DashboardPage() {
           />
         </div>
 
-        <div className="flex flex-col gap-6">
+        <div className="flex min-w-0 flex-col gap-6">
           <Card>
             <CardHeader>
               <CardTitle>Tus eventos</CardTitle>
