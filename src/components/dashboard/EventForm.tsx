@@ -13,9 +13,13 @@ import {
 } from "@/components/ui/Input";
 import { ImageUpload } from "@/components/dashboard/ImageUpload";
 import { DatePicker } from "@/components/ui/DatePicker";
+import { Dropdown } from "@/components/ui/Dropdown";
 import { Stepper } from "@/components/ui/Stepper";
 import { eventSchema } from "@/lib/validations/event";
 import { EVENT_CATEGORIES } from "@/lib/constants";
+
+const OTHER_CATEGORY = "Otro";
+const KNOWN_CATEGORIES: readonly string[] = EVENT_CATEGORIES;
 
 const WIZARD_STEPS = ["Información", "Fecha y lugar", "Imágenes"];
 
@@ -48,7 +52,16 @@ export function EventForm({
   const router = useRouter();
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [category, setCategory] = useState(initial?.category ?? EVENT_CATEGORIES[0]);
+  const initialCategory = initial?.category ?? EVENT_CATEGORIES[0];
+  const initialIsKnown = KNOWN_CATEGORIES.includes(initialCategory);
+  const [categoryChoice, setCategoryChoice] = useState(
+    initialIsKnown ? initialCategory : OTHER_CATEGORY,
+  );
+  const [customCategory, setCustomCategory] = useState(
+    initialIsKnown ? "" : initialCategory,
+  );
+  const category =
+    categoryChoice === OTHER_CATEGORY ? customCategory.trim() : categoryChoice;
   const [date, setDate] = useState(initial?.date ?? "");
   const [time, setTime] = useState(initial?.time ?? "20:00");
   const [venueId, setVenueId] = useState(initial?.venueId ?? venues[0]?.id ?? "");
@@ -143,17 +156,25 @@ export function EventForm({
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="event-category">Categoría</Label>
-              <Select
+              <Dropdown
                 id="event-category"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-              >
-                {EVENT_CATEGORIES.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
-                  </option>
-                ))}
-              </Select>
+                value={categoryChoice}
+                onChange={setCategoryChoice}
+                options={EVENT_CATEGORIES.map((cat) => ({
+                  value: cat,
+                  label: cat,
+                }))}
+              />
+              {categoryChoice === OTHER_CATEGORY && (
+                <Input
+                  id="event-category-custom"
+                  value={customCategory}
+                  onChange={(e) => setCustomCategory(e.target.value)}
+                  placeholder="Escribí la categoría"
+                  maxLength={40}
+                  required
+                />
+              )}
             </div>
           </CardContent>
         </Card>

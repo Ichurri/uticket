@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { EVENT_CATEGORIES } from "@/lib/constants";
 
 const LOCAL_UPLOAD_PATTERN = /^\/uploads\/[\w.-]+$/;
 const BLOB_UPLOAD_PATTERN =
@@ -24,7 +23,11 @@ export const eventSchema = z.object({
     .string()
     .min(10, "La descripción debe tener al menos 10 caracteres")
     .max(5000, "La descripción es demasiado larga"),
-  category: z.enum(EVENT_CATEGORIES, "Elegí una categoría válida"),
+  category: z
+    .string()
+    .trim()
+    .min(1, "Elegí o escribí una categoría")
+    .max(40, "La categoría es demasiado larga"),
   date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Elegí una fecha válida"),
