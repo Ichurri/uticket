@@ -27,6 +27,8 @@ vi.mock("@/lib/api-auth", async () => {
 import { POST as createOrder } from "@/app/api/orders/route";
 import { POST as confirmOrder } from "@/app/api/orders/[id]/confirm/route";
 import { POST as verifyTicket } from "@/app/api/tickets/verify/route";
+import { POST as eventStatus } from "@/app/api/events/[id]/status/route";
+import { POST as undoCheckIn } from "@/app/api/tickets/undo/route";
 import { prisma } from "@/lib/prisma";
 import {
   cleanDatabase,
@@ -130,5 +132,165 @@ describe("POST /api/tickets/verify", () => {
       verifyRequest({ code: tickets[1].code, scanCode: randomUUID() }),
     );
     expect(wrongScan.status).toBe(403);
+  });
+
+  it("refuses a ticket whose event was cancelled", async () => {
+    const { organizer, event, tickets } = await confirmedTickets();
+
+    actAs({ id: organizer.id, role: "ORGANIZER" });
+    const cancelled = await eventStatus(
+      jsonRequest(`http://test.local/api/events/${event.id}/status`, {
+        action: "cancel",
+      }),
+      { params: Promise.resolve({ id: event.id }) },
+    );
+    expect(cancelled.status).toBe(200);
+
+    const response = await verifyTicket(verifyRequest({ code: tickets[0].code }));
+    const result = await response.json();
+    expect(response.status).toBe(409);
+    expect(result.result).toBe("CANCELLED");
+
+    // ...and it was rejected, not consumed: the ticket is not marked USED.
+    const ticket = await prisma.ticket.findUniqueOrThrow({
+      where: { id: tickets[0].id },
+    });
+    expect(ticket.usedAt).toBeNull();
+  });
+});
+
+describe("POST /api/tickets/undo", () => {
+  it("puts a mis-scanned ticket back on the door list", async () => {
+    const { organizer, tickets } = await confirmedTickets();
+    actAs({ id: organizer.id, role: "ORGANIZER" });
+
+    expect(
+      (await verifyTicket(verifyRequest({ code: tickets[0].code }))).status,
+    ).toBe(200);
+
+    const undone = await undoCheckIn(
+      jsonRequest("http://test.local/api/tickets/undo", {
+        code: tickets[0].code,
+      }),
+    );
+    expect(undone.status).toBe(200);
+
+    const ticket = await prisma.ticket.findUniqueOrThrow({
+      where: { id: tickets[0].id },
+    });
+    expect(ticket.status).toBe("VALID");
+    expect(ticket.usedAt).toBeNull();
+
+    // And the person can walk in again for real.
+    const rescan = await verifyTicket(verifyRequest({ code: tickets[0].code }));
+    expect((await rescan.json()).result).toBe("ACCEPTED");
+  });
+
+  it("refuses to undo a check-in older than the window", async () => {
+    const { organizer, tickets } = await confirmedTickets();
+    actAs({ id: organizer.id, role: "ORGANIZER" });
+    await verifyTicket(verifyRequest({ code: tickets[0].code }));
+
+    await prisma.ticket.update({
+      where: { id: tickets[0].id },
+      data: { usedAt: new Date(Date.now() - 10 * 60_000) },
+    });
+
+    const tooLate = await undoCheckIn(
+      jsonRequest("http://test.local/api/tickets/undo", {
+        code: tickets[0].code,
+      }),
+    );
+    expect(tooLate.status).toBe(409);
+    const ticket = await prisma.ticket.findUniqueOrThrow({
+      where: { id: tickets[0].id },
+    });
+    expect(ticket.status).toBe("USED");
+  });
+
+  it("refuses another organizer's ticket", async () => {
+    const { organizer, tickets } = await confirmedTickets();
+    actAs({ id: organizer.id, role: "ORGANIZER" });
+    await verifyTicket(verifyRequest({ code: tickets[0].code }));
+
+    const intruder = await prisma.user.create({
+      data: {
+        email: `other-${randomUUID()}@test.local`,
+        role: "ORGANIZER",
+        emailVerified: new Date(),
+      },
+    });
+    actAs({ id: intruder.id, role: "ORGANIZER" });
+    const response = await undoCheckIn(
+      jsonRequest("http://test.local/api/tickets/undo", {
+        code: tickets[0].code,
+      }),
+    );
+    expect(response.status).toBe(403);
+  });
+});
+
+describe("cancelling an event cascades", () => {
+  it("kills live orders, voids issued tickets and frees the inventory", async () => {
+    const { organizer, event, tickets } = await confirmedTickets();
+    const paidOrderId = tickets[0].orderId;
+
+    // A second buyer is mid-checkout when the event dies.
+    const pendingBuyer = await createBuyer();
+    actAs({ id: pendingBuyer.id, role: "BUYER" });
+    const pending = await createOrder(
+      jsonRequest("http://test.local/api/orders", {
+        eventId: event.id,
+        seatIds: [],
+        zones: [{ zoneId: (await prisma.zone.findFirstOrThrow()).id, quantity: 1 }],
+      }),
+    );
+    expect(pending.status).toBe(201);
+
+    actAs({ id: organizer.id, role: "ORGANIZER" });
+    const response = await eventStatus(
+      jsonRequest(`http://test.local/api/events/${event.id}/status`, {
+        action: "cancel",
+      }),
+      { params: Promise.resolve({ id: event.id }) },
+    );
+    expect(response.status).toBe(200);
+    // Both buyers were emailed (dev transport reports ok).
+    expect((await response.json()).notified).toBe(2);
+
+    const orders = await prisma.order.findMany({ where: { eventId: event.id } });
+    // The unpaid one is gone; the paid one keeps its CONFIRMED history.
+    expect(
+      orders.filter((order) => order.status === "CANCELLED"),
+    ).toHaveLength(1);
+    const paid = orders.find((order) => order.id === paidOrderId);
+    expect(paid?.status).toBe("CONFIRMED");
+
+    // No ticket is valid any more.
+    const stillValid = await prisma.ticket.count({
+      where: { eventId: event.id, status: "VALID" },
+    });
+    expect(stillValid).toBe(0);
+  });
+
+  it("cannot be cancelled twice", async () => {
+    const { organizer, event } = await confirmedTickets();
+    actAs({ id: organizer.id, role: "ORGANIZER" });
+
+    const first = await eventStatus(
+      jsonRequest(`http://test.local/api/events/${event.id}/status`, {
+        action: "cancel",
+      }),
+      { params: Promise.resolve({ id: event.id }) },
+    );
+    expect(first.status).toBe(200);
+
+    const second = await eventStatus(
+      jsonRequest(`http://test.local/api/events/${event.id}/status`, {
+        action: "cancel",
+      }),
+      { params: Promise.resolve({ id: event.id }) },
+    );
+    expect(second.status).toBe(409);
   });
 });

@@ -73,10 +73,6 @@ export async function POST(request: Request, { params }: RouteContext) {
     }
   }
 
-  const seatIds = order.items
-    .map((item) => item.seatId)
-    .filter((seatId): seatId is string => seatId !== null);
-
   try {
     await prisma.$transaction(async (tx) => {
       // Atomic claim: only one concurrent confirm can flip the status, so a
@@ -91,10 +87,8 @@ export async function POST(request: Request, { params }: RouteContext) {
       if (claimed.count === 0) {
         throw new ConfirmError("Este pedido ya no está pendiente de pago");
       }
-      await tx.seat.updateMany({
-        where: { id: { in: seatIds } },
-        data: { status: "SOLD" },
-      });
+      // Nothing to flip on the seats themselves: their occupancy for this
+      // event is derived from this order's items and status (src/lib/seats.ts).
       await tx.ticket.createMany({ data: ticketsData });
     });
   } catch (err) {

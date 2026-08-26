@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api-auth";
 import { orderRejectedEmail, sendEmail } from "@/lib/email";
+import type { OrderStatus } from "@/generated/prisma/enums";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -18,7 +19,6 @@ export async function POST(request: Request, { params }: RouteContext) {
   const order = await prisma.order.findUnique({
     where: { id },
     include: {
-      items: { select: { seatId: true } },
       event: { select: { id: true, title: true, organizerId: true } },
       buyer: { select: { name: true, email: true } },
     },
@@ -40,7 +40,7 @@ export async function POST(request: Request, { params }: RouteContext) {
 
   // Buyers may only abandon unpaid orders; once a proof is submitted the
   // review outcome belongs to the organizer (verify or reject).
-  const cancellable: string[] = isOrganizer
+  const cancellable: OrderStatus[] = isOrganizer
     ? ["PENDING_PAYMENT", "PAYMENT_SUBMITTED"]
     : ["PENDING_PAYMENT"];
   if (!cancellable.includes(order.status)) {
@@ -56,20 +56,21 @@ export async function POST(request: Request, { params }: RouteContext) {
       ? parsed.data.reason
       : null;
 
-  const seatIds = order.items
-    .map((item) => item.seatId)
-    .filter((seatId): seatId is string => seatId !== null);
-
-  await prisma.$transaction([
-    prisma.order.update({
-      where: { id: order.id },
-      data: { status: "CANCELLED", rejectionReason: reason },
-    }),
-    prisma.seat.updateMany({
-      where: { id: { in: seatIds }, status: "RESERVED" },
-      data: { status: "AVAILABLE" },
-    }),
-  ]);
+  // Claim the status atomically, exactly like confirm does: without this,
+  // a buyer cancelling at the same instant the organizer confirms would
+  // leave a CANCELLED order with valid tickets already issued. Cancelling
+  // is all it takes to release the inventory — seat and zone availability
+  // are derived from live orders (src/lib/seats.ts).
+  const cancelled = await prisma.order.updateMany({
+    where: { id: order.id, status: { in: cancellable } },
+    data: { status: "CANCELLED", rejectionReason: reason },
+  });
+  if (cancelled.count === 0) {
+    return NextResponse.json(
+      { error: "Este pedido ya no se puede cancelar" },
+      { status: 409 },
+    );
+  }
 
   // Notify the buyer only when the organizer rejected a submitted proof
   let emailSent: boolean | null = null;

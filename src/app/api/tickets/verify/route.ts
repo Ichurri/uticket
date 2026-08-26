@@ -59,10 +59,20 @@ export async function POST(request: Request) {
   const ticket = await prisma.ticket.findUnique({
     where: { code: parsed.data.code },
     include: {
-      event: { select: { title: true, date: true, time: true, organizerId: true } },
+      event: {
+        select: {
+          title: true,
+          date: true,
+          time: true,
+          organizerId: true,
+          status: true,
+        },
+      },
       seat: { select: { row: true, number: true } },
       zone: { select: { name: true } },
-      order: { select: { buyer: { select: { name: true, email: true } } } },
+      order: {
+        select: { status: true, buyer: { select: { name: true, email: true } } },
+      },
     },
   });
 
@@ -83,11 +93,22 @@ export async function POST(request: Request) {
     );
   }
 
-  if (ticket.status === "CANCELLED") {
+  // A ticket is only good if the ticket, its event and its order all still
+  // stand. Checking just the ticket used to let a cancelled event's tickets
+  // walk in through the door.
+  const rejection =
+    ticket.status === "CANCELLED"
+      ? "Este boleto fue cancelado"
+      : ticket.event.status === "CANCELLED"
+        ? "El evento fue cancelado"
+        : ticket.order.status !== "CONFIRMED"
+          ? "El pedido de este boleto ya no está confirmado"
+          : null;
+  if (rejection) {
     return NextResponse.json(
       {
         result: "CANCELLED",
-        error: "Este boleto fue cancelado",
+        error: rejection,
         ticket: ticketSummary(ticket),
       },
       { status: 409 },

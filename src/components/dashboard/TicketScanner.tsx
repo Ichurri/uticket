@@ -212,6 +212,34 @@ export function TicketScanner({
     }
   }, [scanCode]);
 
+  /** Reverts the check-in shown on screen. Returns an error message to
+   * display, or null when the ticket really went back to VALID. */
+  const undoCheckIn = useCallback(async () => {
+    const code = outcomeRef.current?.ticket?.code;
+    if (!code) return "No hay ningún ingreso para deshacer";
+    try {
+      const response = await fetch("/api/tickets/undo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(scanCode ? { code, scanCode } : { code }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        return data?.error ?? "No se pudo deshacer el ingreso";
+      }
+      // Put the door counter back where it was.
+      setCounts((c) =>
+        c ? { inside: Math.max(0, c.inside - 1), upcoming: c.upcoming + 1 } : c,
+      );
+      // Let the same QR be re-scanned immediately instead of waiting out the
+      // duplicate cooldown — staff usually rescan right after undoing.
+      lastScanRef.current = null;
+      return null;
+    } catch {
+      return "Sin conexión con el servidor";
+    }
+  }, [scanCode]);
+
   const stopCamera = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
@@ -531,6 +559,8 @@ export function TicketScanner({
           accepted={outcome.result === "ACCEPTED"}
           {...verdictCopy(outcome)}
           onDismiss={dismissOutcome}
+          // Only a check-in that actually happened can be undone.
+          onUndo={outcome.result === "ACCEPTED" ? undoCheckIn : undefined}
         />
       )}
     </div>

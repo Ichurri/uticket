@@ -140,14 +140,17 @@ export default async function OrdersPage({ searchParams }: PageProps) {
             const statusInfo = ORDER_STATUS_LABELS[order.status];
             const cancelled = order.status === "CANCELLED";
             const pending = order.status === "PENDING_PAYMENT";
+            // A paid order stays CONFIRMED when its event dies, so the
+            // cancelled event is the thing the buyer actually needs to see.
+            const eventCancelled = order.event.status === "CANCELLED";
             const icon = badgeClasses(order.status);
             return (
               <Link key={order.id} href={`/orders/${order.id}`} className="block">
                 <div
                   className={cn(
                     "flex items-center gap-3 rounded-2xl border border-border bg-card p-3.5 transition-colors hover:border-primary/30",
-                    cancelled && "opacity-[0.55]",
-                    pending && "border-gold/40",
+                    (cancelled || eventCancelled) && "opacity-[0.55]",
+                    pending && !eventCancelled && "border-gold/40",
                   )}
                 >
                   <span
@@ -162,7 +165,8 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                     <p
                       className={cn(
                         "truncate text-sm font-semibold",
-                        cancelled && "text-muted-foreground line-through",
+                        (cancelled || eventCancelled) &&
+                          "text-muted-foreground line-through",
                       )}
                     >
                       {order.event.title}
@@ -175,7 +179,9 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                     </p>
                   </div>
                   <div className="shrink-0">
-                    {pending ? (
+                    {eventCancelled ? (
+                      <Badge variant="danger">Evento cancelado</Badge>
+                    ) : pending ? (
                       <PendingTimeRemaining
                         expiresAt={order.expiresAt.toISOString()}
                       />

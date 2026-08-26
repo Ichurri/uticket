@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
 import { UploadIcon } from "@/components/ui/icons";
 import { MAX_UPLOAD_BYTES } from "@/lib/constants";
+import { toast } from "@/components/ui/Toast";
 
 type Status = "idle" | "attached" | "uploading" | "error";
 
@@ -29,7 +30,9 @@ export function UploadProofForm({
     if (next && next.size > MAX_UPLOAD_BYTES) {
       const message = "La imagen no puede superar los 5 MB";
       setError(message);
-      window.alert(message);
+      // The inline error can land below the fold on a phone; the toast is
+      // what actually tells the buyer why nothing happened.
+      toast.error(message);
       setFile(null);
       setPreviewUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);

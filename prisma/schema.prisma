@@ -26,12 +26,6 @@ enum SeatMapType {
   BOTH
 }
 
-enum SeatStatus {
-  AVAILABLE
-  RESERVED
-  SOLD
-}
-
 enum OrderStatus {
   PENDING_PAYMENT
   PAYMENT_SUBMITTED
@@ -139,11 +133,13 @@ model Zone {
   tickets    Ticket[]
 }
 
+/// Physical seat of a venue. It has NO status of its own: the same venue
+/// hosts many events, so occupancy is per EVENT and is derived from the
+/// order items of that event's live orders (see src/lib/seats.ts).
 model Seat {
-  id     String     @id @default(cuid())
+  id     String @id @default(cuid())
   row    String
   number Int
-  status SeatStatus @default(AVAILABLE)
   zoneId String
 
   zone       Zone        @relation(fields: [zoneId], references: [id], onDelete: Cascade)
@@ -213,6 +209,9 @@ model OrderItem {
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
   seat  Seat? @relation(fields: [seatId], references: [id])
   zone  Zone? @relation(fields: [zoneId], references: [id])
+
+  @@index([seatId])
+  @@index([zoneId])
 }
 
 model Ticket {

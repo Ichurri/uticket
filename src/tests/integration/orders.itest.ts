@@ -30,6 +30,7 @@ import {
   cleanDatabase,
   createApprovedEvent,
   createBuyer,
+  createEventAtVenue,
   jsonRequest,
 } from "./helpers";
 
@@ -123,8 +124,120 @@ describe("POST /api/orders", () => {
   });
 });
 
+describe("availability is scoped per event, not per venue", () => {
+  it("keeps a seat sold for one event available for another event at the same venue", async () => {
+    const { event, venue, organizer, seats } = await createApprovedEvent({
+      numbered: true,
+    });
+    const sameVenueEvent = await createEventAtVenue({
+      venueId: venue.id,
+      organizerId: organizer.id,
+      title: "Segunda función",
+    });
+
+    const firstBuyer = await createBuyer();
+    actAs({ id: firstBuyer.id, role: "BUYER" });
+    const first = await createOrder(
+      orderRequest({ eventId: event.id, seatIds: [seats[0].id], zones: [] }),
+    );
+    expect(first.status).toBe(201);
+
+    // Same physical seat, different function: must still be on sale.
+    const secondBuyer = await createBuyer();
+    actAs({ id: secondBuyer.id, role: "BUYER" });
+    const second = await createOrder(
+      orderRequest({
+        eventId: sameVenueEvent.id,
+        seatIds: [seats[0].id],
+        zones: [],
+      }),
+    );
+    expect(second.status).toBe(201);
+  });
+
+  it("counts free-zone capacity separately for each event at the venue", async () => {
+    const { event, venue, organizer, zone } = await createApprovedEvent({
+      freeZoneCapacity: 2,
+    });
+    const sameVenueEvent = await createEventAtVenue({
+      venueId: venue.id,
+      organizerId: organizer.id,
+      title: "Segunda función",
+    });
+
+    const firstBuyer = await createBuyer();
+    actAs({ id: firstBuyer.id, role: "BUYER" });
+    const soldOutFirst = await createOrder(
+      orderRequest({ eventId: event.id, seatIds: [], zones: [{ zoneId: zone.id, quantity: 2 }] }),
+    );
+    expect(soldOutFirst.status).toBe(201);
+
+    // The first event just sold its whole zone; the second one is untouched.
+    const secondBuyer = await createBuyer();
+    actAs({ id: secondBuyer.id, role: "BUYER" });
+    const second = await createOrder(
+      orderRequest({
+        eventId: sameVenueEvent.id,
+        seatIds: [],
+        zones: [{ zoneId: zone.id, quantity: 2 }],
+      }),
+    );
+    expect(second.status).toBe(201);
+
+    // ...but the first one really is sold out.
+    const third = await createOrder(
+      orderRequest({ eventId: event.id, seatIds: [], zones: [{ zoneId: zone.id, quantity: 1 }] }),
+    );
+    expect(third.status).toBe(409);
+  });
+
+  it("still refuses to sell the same seat twice for the same event", async () => {
+    const { event, seats } = await createApprovedEvent({ numbered: true });
+
+    const firstBuyer = await createBuyer();
+    actAs({ id: firstBuyer.id, role: "BUYER" });
+    const first = await createOrder(
+      orderRequest({ eventId: event.id, seatIds: [seats[0].id], zones: [] }),
+    );
+    expect(first.status).toBe(201);
+
+    const secondBuyer = await createBuyer();
+    actAs({ id: secondBuyer.id, role: "BUYER" });
+    const second = await createOrder(
+      orderRequest({ eventId: event.id, seatIds: [seats[0].id], zones: [] }),
+    );
+    expect(second.status).toBe(409);
+  });
+
+  it("frees a seat again once a cancelled order releases it", async () => {
+    const { event, seats } = await createApprovedEvent({ numbered: true });
+
+    const firstBuyer = await createBuyer();
+    actAs({ id: firstBuyer.id, role: "BUYER" });
+    expect(
+      (
+        await createOrder(
+          orderRequest({ eventId: event.id, seatIds: [seats[0].id], zones: [] }),
+        )
+      ).status,
+    ).toBe(201);
+
+    await prisma.order.updateMany({
+      where: { buyerId: firstBuyer.id },
+      data: { status: "CANCELLED" },
+    });
+
+    const secondBuyer = await createBuyer();
+    actAs({ id: secondBuyer.id, role: "BUYER" });
+    const retry = await createOrder(
+      orderRequest({ eventId: event.id, seatIds: [seats[0].id], zones: [] }),
+    );
+    expect(retry.status).toBe(201);
+  });
+});
+
 describe("expireStaleOrders", () => {
-  it("cancels overdue orders and releases their seats", async () => {
+  it("cancels overdue orders and puts their seats back on sale", async () => {
     const buyer = await createBuyer();
     const { event, seats } = await createApprovedEvent({ numbered: true });
     actAs({ id: buyer.id, role: "BUYER" });
@@ -144,9 +257,13 @@ describe("expireStaleOrders", () => {
       where: { buyerId: buyer.id },
     });
     expect(order.status).toBe("CANCELLED");
-    const seat = await prisma.seat.findUniqueOrThrow({
-      where: { id: seats[0].id },
-    });
-    expect(seat.status).toBe("AVAILABLE");
+
+    // The released seat is buyable again — that IS the release now.
+    const nextBuyer = await createBuyer();
+    actAs({ id: nextBuyer.id, role: "BUYER" });
+    const retry = await createOrder(
+      orderRequest({ eventId: event.id, seatIds: [seats[0].id], zones: [] }),
+    );
+    expect(retry.status).toBe(201);
   });
 });

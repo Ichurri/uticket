@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 import { CheckIcon, XIcon } from "@/components/ui/icons";
+
+type Action = "confirm" | "cancel";
 
 export function OrderActions({
   orderId,
@@ -16,130 +20,138 @@ export function OrderActions({
   compact?: boolean;
 }) {
   const router = useRouter();
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [loading, setLoading] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<Action | null>(null);
+  const [loading, setLoading] = useState<Action | null>(null);
 
-  async function run(action: "confirm" | "cancel", body?: { reason?: string }) {
-    setError(null);
-    setNotice(null);
+  /** Returns an error message for the dialog, or null on success. */
+  async function run(action: Action, body?: { reason?: string }) {
     setLoading(action);
-    const response = await fetch(`/api/orders/${orderId}/${action}`, {
-      method: "POST",
-      ...(body
-        ? {
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          }
-        : {}),
-    });
-    setLoading(null);
+    try {
+      const response = await fetch(`/api/orders/${orderId}/${action}`, {
+        method: "POST",
+        ...(body
+          ? {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            }
+          : {}),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) return data?.error ?? "La acción falló";
 
-    const data = await response.json().catch(() => null);
-    if (!response.ok) {
-      setError(data?.error ?? "La acción falló");
-      return;
+      if (action === "confirm") {
+        toast.success(
+          `Pago confirmado — se emitieron ${data?.tickets ?? "los"} boleto${data?.tickets === 1 ? "" : "s"}.`,
+        );
+      } else {
+        toast.success("Comprobante rechazado y lugares liberados.");
+      }
+      // An unsent email is the organizer's problem to solve by other means,
+      // so it can't be a silent detail.
+      if (data?.emailSent === false) {
+        toast.warning(
+          "El correo al comprador falló — avisale por WhatsApp o teléfono.",
+        );
+      }
+      router.refresh();
+      return null;
+    } catch {
+      return "Sin conexión con el servidor";
+    } finally {
+      setLoading(null);
     }
-    if (data?.emailSent === false) {
-      setNotice(
-        "Listo, pero el correo al comprador falló — avisale por otro medio.",
-      );
-    }
-    router.refresh();
   }
 
-  function confirm() {
-    const message = hasProof
-      ? "¿Verificar el comprobante y confirmar el pago? Se generarán los boletos y se avisará al comprador por correo."
-      : "¿Confirmar que recibiste el pago? Se generarán los boletos.";
-    if (!window.confirm(message)) return;
-    run("confirm");
-  }
+  const busy = loading !== null;
 
-  function reject() {
-    let reason = window.prompt(
-      "Motivo del rechazo (obligatorio, se envía al comprador por correo):",
-      "",
-    );
-    while (reason !== null && reason.trim() === "") {
-      reason = window.prompt(
-        "El motivo es obligatorio para rechazar un comprobante. Contá qué pasó:",
-        "",
-      );
-    }
-    if (reason === null) return; // user pressed cancel
-    run("cancel", { reason: reason.trim() });
-  }
+  const dialogs = (
+    <>
+      <ConfirmDialog
+        open={dialog === "confirm"}
+        onClose={() => setDialog(null)}
+        title={hasProof ? "¿Verificar el comprobante?" : "¿Confirmar el pago?"}
+        description={
+          hasProof
+            ? "Confirmá solo si viste la transferencia acreditada en tu cuenta. Se emiten los boletos y se le avisa al comprador por correo."
+            : "Se emiten los boletos y se le avisa al comprador por correo."
+        }
+        confirmLabel={hasProof ? "Verificar pago" : "Confirmar pago"}
+        onConfirm={() => run("confirm")}
+      />
+      <ConfirmDialog
+        open={dialog === "cancel"}
+        onClose={() => setDialog(null)}
+        title="¿Rechazar este comprobante?"
+        description="El pedido se cancela, los lugares se liberan y el comprador recibe tu motivo por correo."
+        confirmLabel="Rechazar comprobante"
+        tone="danger"
+        reason={{
+          label: "Motivo del rechazo",
+          placeholder:
+            "Ej: el monto transferido no coincide con el total del pedido.",
+          required: true,
+          maxLength: 300,
+        }}
+        onConfirm={(reason) => run("cancel", { reason })}
+      />
+    </>
+  );
 
   if (compact) {
     return (
-      <div className="flex flex-col items-end gap-1">
-        <div className="flex items-center gap-2">
-          <Button
-            size="md"
-            className="w-11 px-0"
-            disabled={loading !== null}
-            onClick={confirm}
-            aria-label={hasProof ? "Verificar pago" : "Confirmar pago"}
-            title={hasProof ? "Verificar pago" : "Confirmar pago"}
-          >
-            {loading === "confirm" ? (
-              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-            ) : (
-              <CheckIcon className="h-4 w-4" />
-            )}
-          </Button>
-          <Button
-            variant="outline"
-            size="md"
-            className="w-11 px-0"
-            disabled={loading !== null}
-            onClick={reject}
-            aria-label="Rechazar"
-            title="Rechazar"
-          >
-            {loading === "cancel" ? (
-              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-            ) : (
-              <XIcon className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
-        {error && (
-          <p className="max-w-[160px] text-right text-xs text-danger">
-            {error}
-          </p>
-        )}
-        {notice && (
-          <p className="max-w-[160px] text-right text-xs text-warning">
-            {notice}
-          </p>
-        )}
+      <div className="flex items-center gap-2">
+        <Button
+          size="md"
+          className="w-11 px-0"
+          disabled={busy}
+          onClick={() => setDialog("confirm")}
+          aria-label={hasProof ? "Verificar pago" : "Confirmar pago"}
+          title={hasProof ? "Verificar pago" : "Confirmar pago"}
+        >
+          {loading === "confirm" ? (
+            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          ) : (
+            <CheckIcon className="h-4 w-4" />
+          )}
+        </Button>
+        <Button
+          variant="outline"
+          size="md"
+          className="w-11 px-0"
+          disabled={busy}
+          onClick={() => setDialog("cancel")}
+          aria-label="Rechazar"
+          title="Rechazar"
+        >
+          {loading === "cancel" ? (
+            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          ) : (
+            <XIcon className="h-4 w-4" />
+          )}
+        </Button>
+        {dialogs}
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <Button size="sm" disabled={loading !== null} onClick={confirm}>
-          {loading === "confirm"
-            ? "Confirmando..."
-            : hasProof
-              ? "Verificar pago"
-              : "Confirmar pago"}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={loading !== null}
-          onClick={reject}
-        >
-          {loading === "cancel" ? "Rechazando..." : "Rechazar"}
-        </Button>
-      </div>
-      {error && <p className="text-xs text-danger">{error}</p>}
-      {notice && <p className="text-xs text-warning">{notice}</p>}
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <Button size="sm" disabled={busy} onClick={() => setDialog("confirm")}>
+        {loading === "confirm"
+          ? "Confirmando..."
+          : hasProof
+            ? "Verificar pago"
+            : "Confirmar pago"}
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={busy}
+        onClick={() => setDialog("cancel")}
+      >
+        {loading === "cancel" ? "Rechazando..." : "Rechazar"}
+      </Button>
+      {dialogs}
     </div>
   );
 }

@@ -204,6 +204,41 @@ body {
   }
 }
 
+/* Modal entrance: the native <dialog> pops into the top layer with no
+   transition of its own, which reads as a jump cut on the destructive
+   confirmations it's used for. */
+@utility animate-dialog-in {
+  animation: dialog-in 0.16s ease-out both;
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Toasts slide up from the bottom edge on mobile, in from the right on
+   desktop — a single vertical entrance reads correctly in both. */
+@utility animate-toast-in {
+  animation: toast-in 0.2s ease-out both;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Violet shimmer for skeletons ("Función Nocturna": never neutral gray).
    The global reduced-motion block below freezes it to a static tint. */
 @utility animate-shimmer {

@@ -129,6 +129,23 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </Link>
       </div>
 
+      {order.event.status === "CANCELLED" && order.status === "CONFIRMED" && (
+        <Card className="border-danger/40 bg-danger/5">
+          <CardContent className="flex flex-col gap-2 p-6">
+            <p className="font-semibold text-danger">
+              El organizador canceló este evento
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Tus boletos dejaron de ser válidos para ingresar. Como ya
+              habías pagado, coordiná la devolución directamente con el
+              organizador — el cobro se hizo por transferencia bancaria, así
+              que la devolución también sale de su cuenta.
+            </p>
+            {organizerContact}
+          </CardContent>
+        </Card>
+      )}
+
       {order.status === "PENDING_PAYMENT" && (
         <>
           <Stepper

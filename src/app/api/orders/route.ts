@@ -3,9 +3,11 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api-auth";
 import { createOrderSchema } from "@/lib/validations/order";
 import { expireStaleOrders, ORDER_EXPIRY_MINUTES } from "@/lib/orders";
+import { findTakenSeatIds, LIVE_ORDER_STATUSES } from "@/lib/seats";
 import { getPlatformSettings } from "@/lib/settings";
-import { salesAreClosed } from "@/lib/utils";
+import { formatCurrency, salesAreClosed } from "@/lib/utils";
 import { MAX_PENDING_ORDERS_PER_BUYER } from "@/lib/constants";
+import { orderCreatedEmail, sendEmail } from "@/lib/email";
 import { Prisma } from "@/generated/prisma/client";
 
 class OrderError extends Error {}
@@ -28,7 +30,7 @@ export async function POST(request: Request) {
 
   const buyer = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { emailVerified: true },
+    select: { emailVerified: true, name: true, email: true },
   });
   if (!buyer?.emailVerified) {
     return NextResponse.json(
@@ -138,16 +140,15 @@ export async function POST(request: Request) {
   try {
     const order = await prisma.$transaction(
       async (tx) => {
-        if (seatIds.length > 0) {
-          const reserved = await tx.seat.updateMany({
-            where: { id: { in: seatIds }, status: "AVAILABLE" },
-            data: { status: "RESERVED" },
-          });
-          if (reserved.count !== seatIds.length) {
-            throw new OrderError(
-              "Alguno de los asientos elegidos ya no está disponible. Actualizá el mapa e intentá de nuevo.",
-            );
-          }
+        // Availability is scoped to THIS event: the venue's seats are shared
+        // by every event held there, so what matters is whether a live order
+        // *of this event* already holds them. Serializable isolation is what
+        // makes the read-then-insert safe against a concurrent buyer.
+        const taken = await findTakenSeatIds(event.id, seatIds, tx);
+        if (taken.length > 0) {
+          throw new OrderError(
+            "Alguno de los asientos elegidos ya no está disponible. Actualizá el mapa e intentá de nuevo.",
+          );
         }
 
         for (const item of zoneItems) {
@@ -157,17 +158,13 @@ export async function POST(request: Request) {
             where: {
               zoneId: zone.id,
               seatId: null,
-              order: {
-                status: {
-                  in: ["PENDING_PAYMENT", "PAYMENT_SUBMITTED", "CONFIRMED"],
-                },
-              },
+              order: { eventId: event.id, status: { in: LIVE_ORDER_STATUSES } },
             },
           });
-          const taken = committed._sum.quantity ?? 0;
-          if (taken + item.quantity > zone.capacity) {
+          const committedQuantity = committed._sum.quantity ?? 0;
+          if (committedQuantity + item.quantity > zone.capacity) {
             throw new OrderError(
-              `No quedan suficientes cupos en la zona ${zone.name} (disponibles: ${Math.max(0, zone.capacity - taken)})`,
+              `No quedan suficientes cupos en la zona ${zone.name} (disponibles: ${Math.max(0, zone.capacity - committedQuantity)})`,
             );
           }
         }
@@ -187,6 +184,18 @@ export async function POST(request: Request) {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+
+    // The buyer has 15 minutes to pay; if they close the tab there is
+    // otherwise no way back to this order. Failures never block the response.
+    const origin = new URL(request.url).origin;
+    const { subject, html } = orderCreatedEmail(
+      buyer.name,
+      event.title,
+      formatCurrency(totalAmount),
+      ORDER_EXPIRY_MINUTES,
+      `${origin}/orders/${order.id}`,
+    );
+    void sendEmail({ to: buyer.email, subject, html });
 
     return NextResponse.json({ order }, { status: 201 });
   } catch (err) {

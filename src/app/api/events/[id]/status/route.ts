@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api-auth";
 import { eventStatusActionSchema } from "@/lib/validations/event";
-import { eventPendingReviewEmail, sendEmail } from "@/lib/email";
+import {
+  eventCancelledEmail,
+  eventPendingReviewEmail,
+  sendEmail,
+} from "@/lib/email";
+import { LIVE_ORDER_STATUSES } from "@/lib/seats";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -72,9 +77,79 @@ export async function POST(request: Request, { params }: RouteContext) {
       { status: 409 },
     );
   }
-  const updated = await prisma.event.update({
-    where: { id },
-    data: { status: "CANCELLED" },
+
+  // Everyone still holding something for this event, captured BEFORE the
+  // cascade cancels their orders (afterwards they'd no longer be "live").
+  const affected = await prisma.order.findMany({
+    where: { eventId: id, status: { in: LIVE_ORDER_STATUSES } },
+    select: {
+      id: true,
+      status: true,
+      buyer: { select: { name: true, email: true } },
+    },
   });
-  return NextResponse.json({ event: updated });
+
+  const [claimed] = await prisma.$transaction([
+    // Guarded like every other status change: a second cancel is a no-op.
+    prisma.event.updateMany({
+      where: { id, status: { in: ["PENDING", "APPROVED"] } },
+      data: { status: "CANCELLED" },
+    }),
+    // Unpaid and in-review orders die with the event, releasing their
+    // inventory (availability is derived from live orders).
+    prisma.order.updateMany({
+      where: {
+        eventId: id,
+        status: { in: ["PENDING_PAYMENT", "PAYMENT_SUBMITTED"] },
+      },
+      data: {
+        status: "CANCELLED",
+        rejectionReason: "El organizador canceló el evento.",
+      },
+    }),
+    // Paid orders stay CONFIRMED (the money was really paid and the refund
+    // is arranged off-platform), but their tickets stop being valid so the
+    // door scanner rejects them.
+    prisma.ticket.updateMany({
+      where: { eventId: id, status: "VALID" },
+      data: { status: "CANCELLED" },
+    }),
+  ]);
+
+  if (claimed.count === 0) {
+    return NextResponse.json(
+      { error: "Este evento no se puede cancelar" },
+      { status: 409 },
+    );
+  }
+
+  const origin = new URL(request.url).origin;
+  const organizer = await prisma.user.findUnique({
+    where: { id: event.organizerId },
+    select: { phone: true },
+  });
+  const results = await Promise.all(
+    affected.map((order) => {
+      const { subject, html } = eventCancelledEmail(
+        order.buyer.name,
+        event.title,
+        order.status === "CONFIRMED",
+        organizer?.phone ?? null,
+        `${origin}/events`,
+      );
+      return sendEmail({ to: order.buyer.email, subject, html });
+    }),
+  );
+  const emailsFailed = results.filter((result) => !result.ok).length;
+  if (emailsFailed > 0) {
+    console.error(
+      `[email] ${emailsFailed}/${affected.length} cancellation emails failed for event ${id}`,
+    );
+  }
+
+  return NextResponse.json({
+    event: { ...event, status: "CANCELLED" },
+    notified: affected.length - emailsFailed,
+    emailsFailed,
+  });
 }

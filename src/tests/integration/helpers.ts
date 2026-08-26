@@ -64,9 +64,27 @@ export async function createApprovedEvent({
         ],
       })
     : [];
-  const event = await prisma.event.create({
+  const event = await createEventAtVenue({
+    venueId: venue.id,
+    organizerId: organizer.id,
+  });
+  return { organizer, venue, zone, seats, event };
+}
+
+/** A second (third, ...) event in an existing venue — the case that used to
+ * break: every event held there sells its own copy of the seat map. */
+export function createEventAtVenue({
+  venueId,
+  organizerId,
+  title = "Evento Test",
+}: {
+  venueId: string;
+  organizerId: string;
+  title?: string;
+}) {
+  return prisma.event.create({
     data: {
-      title: "Evento Test",
+      title,
       description: "Descripción de prueba",
       category: "Música",
       date: eventDate(futureDateString()),
@@ -74,11 +92,10 @@ export async function createApprovedEvent({
       status: "APPROVED",
       price: 100,
       paymentQrImage: "/uploads/qr-test.png",
-      venueId: venue.id,
-      organizerId: organizer.id,
+      venueId,
+      organizerId,
     },
   });
-  return { organizer, venue, zone, seats, event };
 }
 
 export function jsonRequest(url: string, body: unknown) {

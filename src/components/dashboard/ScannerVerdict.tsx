@@ -16,23 +16,48 @@ const AUTO_DISMISS_S = Math.round(AUTO_DISMISS_MS / 1000);
  * VÁLIDO shows an explicit "Escanear siguiente" button (the confirm step)
  * plus a draining progress bar that auto-advances if staff don't tap;
  * anything else waits for the door staff to press "Escanear otro".
+ * A mis-scan can be reverted right here with "Deshacer" — the auto-advance
+ * pauses as soon as staff reach for it, so the fix isn't a race.
  */
 export function ScannerVerdict({
   accepted,
   reason,
   detail,
   onDismiss,
+  onUndo,
 }: {
   accepted: boolean;
   reason: string;
   detail?: string;
   onDismiss: () => void;
+  /** Reverts the check-in that just happened; absent when there's nothing
+   * to revert (a rejected scan never consumed anything). */
+  onUndo?: () => Promise<string | null>;
 }) {
   const [draining, setDraining] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(AUTO_DISMISS_S);
+  const [undoState, setUndoState] = useState<"idle" | "working" | "done">(
+    "idle",
+  );
+  const [undoError, setUndoError] = useState<string | null>(null);
+  const undoing = undoState !== "idle";
+
+  async function handleUndo() {
+    if (!onUndo || undoing) return;
+    setUndoState("working");
+    setUndoError(null);
+    const error = await onUndo();
+    if (error) {
+      setUndoState("idle");
+      setUndoError(error);
+      return;
+    }
+    setUndoState("done");
+  }
 
   useEffect(() => {
-    if (!accepted) return;
+    // Staff reaching for "Deshacer" must not have the screen yanked away.
+    if (!accepted || undoing) return;
     const startId = requestAnimationFrame(() => setDraining(true));
     const dismissId = setTimeout(onDismiss, AUTO_DISMISS_MS);
     const tickId = setInterval(() => {
@@ -43,7 +68,7 @@ export function ScannerVerdict({
       clearTimeout(dismissId);
       clearInterval(tickId);
     };
-  }, [accepted, onDismiss]);
+  }, [accepted, undoing, onDismiss]);
 
   return (
     <div
@@ -62,12 +87,14 @@ export function ScannerVerdict({
       </div>
 
       <p className="text-[46px] font-extrabold leading-none tracking-tight text-white">
-        {accepted ? "VÁLIDO" : "NO PASA"}
+        {undoState === "done" ? "DESHECHO" : accepted ? "VÁLIDO" : "NO PASA"}
       </p>
 
       <div className="flex flex-col items-center gap-1.5">
         <span className="max-w-full truncate rounded-full bg-white/20 px-4 py-1.5 text-sm font-medium text-white">
-          {reason}
+          {undoState === "done"
+            ? "El boleto vuelve a estar válido"
+            : reason}
         </span>
         {detail && (
           <span className="max-w-full truncate font-mono text-xs font-medium uppercase tracking-[0.08em] text-white/70">
@@ -84,22 +111,43 @@ export function ScannerVerdict({
             className="h-[52px] bg-white text-success hover:bg-white/90"
             onClick={onDismiss}
           >
-            Escanear siguiente
+            {undoState === "done" ? "Escanear otro" : "Escanear siguiente"}
           </Button>
-          <div className="flex flex-col items-center gap-1.5">
-            <span className="h-1 w-40 overflow-hidden rounded-full bg-white/25">
-              <span
-                className={cn(
-                  "block h-full rounded-full bg-white ease-linear motion-reduce:transition-none",
-                  draining ? "w-0" : "w-full",
-                )}
-                style={{ transition: `width ${AUTO_DISMISS_MS}ms linear` }}
-              />
+          {onUndo && undoState !== "done" && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-11 text-white underline underline-offset-4 hover:bg-white/15 hover:text-white"
+              disabled={undoing}
+              onClick={handleUndo}
+            >
+              {undoState === "working"
+                ? "Deshaciendo..."
+                : "Deshacer — escaneé por error"}
+            </Button>
+          )}
+          {undoError && (
+            <span className="max-w-xs text-xs font-medium text-white">
+              {undoError}
             </span>
-            <span className="text-xs text-white/70">
-              Avanza solo en {secondsLeft}s si no tocás
-            </span>
-          </div>
+          )}
+          {undoState === "idle" && (
+            <div className="flex flex-col items-center gap-1.5">
+              <span className="h-1 w-40 overflow-hidden rounded-full bg-white/25">
+                <span
+                  className={cn(
+                    "block h-full rounded-full bg-white ease-linear motion-reduce:transition-none",
+                    draining ? "w-0" : "w-full",
+                  )}
+                  style={{ transition: `width ${AUTO_DISMISS_MS}ms linear` }}
+                />
+              </span>
+              <span className="text-xs text-white/70">
+                Avanza solo en {secondsLeft}s si no tocás
+              </span>
+            </div>
+          )}
         </div>
       ) : (
         <Button

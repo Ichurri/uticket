@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 
 export function UserSuspendButton({
   userId,
@@ -12,45 +14,56 @@ export function UserSuspendButton({
   suspended: boolean;
 }) {
   const router = useRouter();
-  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function toggle() {
-    const message = suspended
-      ? "¿Reactivar esta cuenta? El usuario podrá volver a iniciar sesión."
-      : "¿Suspender esta cuenta? El usuario no podrá iniciar sesión ni operar.";
-    if (!window.confirm(message)) return;
-
-    setError(null);
     setLoading(true);
-    const response = await fetch(`/api/admin/users/${userId}/suspend`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ suspended: !suspended }),
-    });
-    setLoading(false);
-
-    if (!response.ok) {
-      const data = await response.json().catch(() => null);
-      setError(data?.error ?? "La acción falló");
-      return;
+    try {
+      const response = await fetch(`/api/admin/users/${userId}/suspend`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ suspended: !suspended }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        return data?.error ?? "La acción falló";
+      }
+      toast.success(suspended ? "Cuenta reactivada." : "Cuenta suspendida.");
+      router.refresh();
+      return null;
+    } catch {
+      return "Sin conexión con el servidor";
+    } finally {
+      setLoading(false);
     }
-    router.refresh();
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <>
       <Button
         type="button"
         variant={suspended ? "outline" : "ghost"}
         size="sm"
         className={suspended ? undefined : "text-danger"}
-        onClick={toggle}
+        onClick={() => setOpen(true)}
         disabled={loading}
       >
         {loading ? "Guardando..." : suspended ? "Reactivar" : "Suspender"}
       </Button>
-      {error && <p className="text-xs text-danger">{error}</p>}
-    </div>
+      <ConfirmDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title={suspended ? "¿Reactivar esta cuenta?" : "¿Suspender esta cuenta?"}
+        description={
+          suspended
+            ? "El usuario va a poder volver a iniciar sesión y operar normalmente."
+            : "El usuario no va a poder iniciar sesión ni operar. Sus eventos y pedidos quedan como están."
+        }
+        confirmLabel={suspended ? "Reactivar" : "Suspender"}
+        tone={suspended ? "primary" : "danger"}
+        onConfirm={toggle}
+      />
+    </>
   );
 }

@@ -160,6 +160,35 @@ export function passwordResetEmail(rawName: string | null, resetUrl: string) {
   };
 }
 
+export function orderCreatedEmail(
+  rawName: string | null,
+  rawEventTitle: string,
+  rawTotal: string,
+  minutesToPay: number,
+  orderUrl: string,
+) {
+  const name = rawName ? escapeHtml(rawName) : null;
+  const eventTitle = escapeHtml(rawEventTitle);
+  const total = escapeHtml(rawTotal);
+  return {
+    subject: `Completá el pago de tu pedido para ${rawEventTitle}`,
+    html: layout(
+      `Hola${name ? ` ${name}` : ""}, tu pedido está reservado`,
+      `<p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
+        Guardamos tus lugares para <strong>${eventTitle}</strong> por
+        <strong>${minutesToPay} minutos</strong>. Para completarlo, escaneá el QR
+        del organizador desde tu banco, transferí <strong>${total}</strong> y
+        subí el comprobante desde el link de abajo.
+      </p>
+      ${button(orderUrl, "Pagar mi pedido")}
+      <p style="margin:0;font-size:14px;line-height:1.6;">
+        Si el tiempo se vence, los lugares se liberan y vas a tener que
+        elegirlos de nuevo — no se te cobra nada.
+      </p>`,
+    ),
+  };
+}
+
 export function orderConfirmedEmail(
   rawName: string | null,
   rawEventTitle: string,
@@ -205,6 +234,80 @@ export function orderRejectedEmail(
         la compra de nuevo desde la página del evento.
       </p>
       ${button(eventUrl, "Volver al evento")}`,
+    ),
+  };
+}
+
+export function eventCancelledEmail(
+  rawName: string | null,
+  rawEventTitle: string,
+  /** A paid order needs a refund; an unpaid one just goes away. */
+  wasPaid: boolean,
+  rawOrganizerPhone: string | null,
+  eventsUrl: string,
+) {
+  const name = rawName ? escapeHtml(rawName) : null;
+  const eventTitle = escapeHtml(rawEventTitle);
+  const phone = rawOrganizerPhone ? escapeHtml(rawOrganizerPhone) : null;
+  return {
+    subject: `${rawEventTitle} fue cancelado`,
+    html: layout(
+      `Hola${name ? ` ${name}` : ""}, se canceló ${eventTitle}`,
+      `<p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
+        El organizador canceló <strong>${eventTitle}</strong>, así que tus
+        boletos ya no son válidos para ingresar.
+      </p>
+      ${
+        wasPaid
+          ? `<p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
+        Como ya habías pagado, coordiná la devolución directamente con el
+        organizador${phone ? ` al <strong>${phone}</strong>` : ""}. El pago se hizo
+        por transferencia bancaria, así que la devolución también sale de su
+        cuenta.
+      </p>`
+          : `<p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
+        Tu pedido quedó cancelado y no se te cobró nada.
+      </p>`
+      }
+      ${button(eventsUrl, "Ver otros eventos")}`,
+    ),
+  };
+}
+
+export function eventReviewedEmail(
+  rawOrganizerName: string | null,
+  rawEventTitle: string,
+  approved: boolean,
+  rawReason: string | null,
+  eventUrl: string,
+) {
+  const name = rawOrganizerName ? escapeHtml(rawOrganizerName) : null;
+  const eventTitle = escapeHtml(rawEventTitle);
+  const reason = rawReason ? escapeHtml(rawReason) : null;
+  return {
+    subject: approved
+      ? `${rawEventTitle} fue aprobado y ya está publicado`
+      : `${rawEventTitle} necesita cambios antes de publicarse`,
+    html: layout(
+      approved
+        ? `¡Listo${name ? ` ${name}` : ""}! Tu evento está publicado`
+        : `Hola${name ? ` ${name}` : ""}, tu evento necesita cambios`,
+      approved
+        ? `<p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
+        <strong>${eventTitle}</strong> ya está aprobado y visible en la
+        cartelera. Desde ahora podés recibir pedidos y revisar comprobantes
+        desde tu panel.
+      </p>
+      ${button(eventUrl, "Ver mi evento")}`
+        : `<p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
+        Revisamos <strong>${eventTitle}</strong> y volvió a borrador para que
+        puedas corregirlo.
+        ${reason ? `<br/><br/>Motivo: <em>${reason}</em>` : ""}
+      </p>
+      <p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
+        Corregí lo que haga falta y volvé a enviarlo a revisión.
+      </p>
+      ${button(eventUrl, "Editar mi evento")}`,
     ),
   };
 }

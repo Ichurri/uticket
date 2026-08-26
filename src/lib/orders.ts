@@ -4,29 +4,14 @@ export const ORDER_EXPIRY_MINUTES = 15;
 
 /**
  * Lazy expiration: there is no cron, so callers run this before reading or
- * writing orders. Cancels overdue PENDING_PAYMENT orders and releases the
- * seats they were holding.
+ * writing orders. Cancelling the overdue orders is all it takes to release
+ * what they were holding — both seats and free-zone capacity are derived
+ * from live orders (see src/lib/seats.ts), so there is no separate
+ * inventory row to reset.
  */
 export async function expireStaleOrders() {
-  const stale = await prisma.order.findMany({
+  await prisma.order.updateMany({
     where: { status: "PENDING_PAYMENT", expiresAt: { lt: new Date() } },
-    select: { id: true, items: { select: { seatId: true } } },
+    data: { status: "CANCELLED" },
   });
-  if (stale.length === 0) return;
-
-  const orderIds = stale.map((order) => order.id);
-  const seatIds = stale
-    .flatMap((order) => order.items.map((item) => item.seatId))
-    .filter((seatId): seatId is string => seatId !== null);
-
-  await prisma.$transaction([
-    prisma.order.updateMany({
-      where: { id: { in: orderIds }, status: "PENDING_PAYMENT" },
-      data: { status: "CANCELLED" },
-    }),
-    prisma.seat.updateMany({
-      where: { id: { in: seatIds }, status: "RESERVED" },
-      data: { status: "AVAILABLE" },
-    }),
-  ]);
 }

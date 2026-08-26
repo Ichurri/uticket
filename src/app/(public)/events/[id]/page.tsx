@@ -3,8 +3,9 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { expireStaleOrders } from "@/lib/orders";
+import { getEventInventory } from "@/lib/seats";
 import { getPlatformSettings } from "@/lib/settings";
-import { formatDate, salesAreClosed } from "@/lib/utils";
+import { eventStartsAt, formatDate, salesAreClosed } from "@/lib/utils";
 import { TicketIcon, CalendarIcon, MapPinIcon, PhoneIcon } from "@/components/ui/icons";
 import { Badge } from "@/components/ui/Badge";
 import {
@@ -14,6 +15,8 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { SeatMap } from "@/components/seats/SeatMap";
+import { ShareEventButton } from "@/components/events/ShareEventButton";
+import { absoluteUrl } from "@/lib/site";
 import { SelectionSummary } from "@/components/seats/SelectionSummary";
 import type { EventSeatMapDto, ZoneDto } from "@/types/seat-map";
 
@@ -29,7 +32,7 @@ async function getApprovedEvent(id: string) {
           zones: {
             include: {
               seats: {
-                select: { id: true, row: true, number: true, status: true },
+                select: { id: true, row: true, number: true },
                 orderBy: [{ row: "asc" }, { number: "asc" }],
               },
             },
@@ -41,32 +44,41 @@ async function getApprovedEvent(id: string) {
   });
 }
 
-/** Tickets already committed per free-capacity zone (pending or confirmed orders). */
-async function getZoneSoldCounts(zoneIds: string[]) {
-  if (zoneIds.length === 0) return new Map<string, number>();
-  const grouped = await prisma.orderItem.groupBy({
-    by: ["zoneId"],
-    where: {
-      zoneId: { in: zoneIds },
-      seatId: null,
-      order: {
-        status: { in: ["PENDING_PAYMENT", "PAYMENT_SUBMITTED", "CONFIRMED"] },
-      },
-    },
-    _sum: { quantity: true },
-  });
-  return new Map(
-    grouped.map((row) => [row.zoneId as string, row._sum.quantity ?? 0]),
-  );
-}
-
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { id } = await params;
   const event = await prisma.event.findUnique({
     where: { id, status: "APPROVED" },
-    select: { title: true },
+    select: {
+      title: true,
+      description: true,
+      date: true,
+      time: true,
+      venue: { select: { name: true, city: true } },
+    },
   });
-  return { title: event?.title ?? "Evento" };
+  if (!event) return { title: "Evento" };
+
+  // What a shared link should say at a glance: what, when, where. The
+  // og:image is the generated card in opengraph-image.tsx.
+  const description = `${formatDate(event.date)} · ${event.time} hrs · ${event.venue.name}, ${event.venue.city}. ${event.description}`
+    .replace(/\s+/g, " ")
+    .slice(0, 200);
+
+  return {
+    title: event.title,
+    description,
+    openGraph: {
+      type: "website",
+      title: `${event.title} · Üticket`,
+      description,
+      url: `/events/${id}`,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${event.title} · Üticket`,
+      description,
+    },
+  };
 }
 
 export default async function EventDetailPage({ params }: PageProps) {
@@ -79,16 +91,21 @@ export default async function EventDetailPage({ params }: PageProps) {
   const salesClosed = salesAreClosed(event, orderCutoffHours);
 
   const basePrice = Number(event.price);
-  const freeZoneIds = event.venue.zones
-    .filter((zone) => zone.rows === null)
-    .map((zone) => zone.id);
-  const soldByZone = await getZoneSoldCounts(freeZoneIds);
+  // What THIS event's live orders hold — the venue's seats are shared with
+  // every other event held there, so occupancy is never read off the seat.
+  const { seatHolds, freeZoneTaken } = await getEventInventory(event.id);
 
   const zones: ZoneDto[] = event.venue.zones.map((zone) => {
     const numbered = zone.rows !== null;
+    const seats = numbered
+      ? zone.seats.map((seat) => ({
+          ...seat,
+          status: seatHolds.get(seat.id) ?? ("AVAILABLE" as const),
+        }))
+      : [];
     const available = numbered
-      ? zone.seats.filter((seat) => seat.status === "AVAILABLE").length
-      : Math.max(0, zone.capacity - (soldByZone.get(zone.id) ?? 0));
+      ? seats.filter((seat) => seat.status === "AVAILABLE").length
+      : Math.max(0, zone.capacity - (freeZoneTaken.get(zone.id) ?? 0));
     return {
       id: zone.id,
       name: zone.name,
@@ -96,7 +113,7 @@ export default async function EventDetailPage({ params }: PageProps) {
       price: basePrice * Number(zone.priceMultiplier),
       capacity: zone.capacity,
       available,
-      seats: numbered ? zone.seats : [],
+      seats,
     };
   });
 
@@ -106,8 +123,56 @@ export default async function EventDetailPage({ params }: PageProps) {
     zones,
   };
 
+  const cheapestZone = zones.reduce<ZoneDto | null>(
+    (cheapest, zone) =>
+      !cheapest || zone.price < cheapest.price ? zone : cheapest,
+    null,
+  );
+  const eventJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Event",
+    name: event.title,
+    description: event.description,
+    startDate: eventStartsAt(event).toISOString(),
+    eventStatus: "https://schema.org/EventScheduled",
+    eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
+    location: {
+      "@type": "Place",
+      name: event.venue.name,
+      address: {
+        "@type": "PostalAddress",
+        streetAddress: event.venue.address,
+        addressLocality: event.venue.city,
+        addressCountry: "BO",
+      },
+    },
+    ...(event.coverImage ? { image: [absoluteUrl(event.coverImage)] } : {}),
+    organizer: {
+      "@type": "Organization",
+      name: event.organizer.name ?? "Üticket",
+    },
+    ...(cheapestZone
+      ? {
+          offers: {
+            "@type": "Offer",
+            price: cheapestZone.price,
+            priceCurrency: "BOB",
+            availability: salesClosed
+              ? "https://schema.org/SoldOut"
+              : "https://schema.org/InStock",
+            url: absoluteUrl(`/events/${event.id}`),
+          },
+        }
+      : {}),
+  };
+
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-10">
+      <script
+        type="application/ld+json"
+        // Serialized from our own DB rows, not from user-controlled HTML.
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(eventJsonLd) }}
+      />
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-6 lg:col-span-2">
           <div className="relative aspect-video overflow-hidden rounded-xl border border-border bg-gradient-to-br from-primary/25 via-primary/10 to-accent/20">
@@ -145,7 +210,13 @@ export default async function EventDetailPage({ params }: PageProps) {
                 Organiza: {event.organizer.name ?? "Üticket"}
               </span>
             </div>
-            <h1 className="mt-2 text-3xl font-bold">{event.title}</h1>
+            <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
+              <h1 className="text-3xl font-bold">{event.title}</h1>
+              <ShareEventButton
+                title={event.title}
+                summary={`${formatDate(event.date)} · ${event.time} hrs · ${event.venue.name}, ${event.venue.city}`}
+              />
+            </div>
           </div>
 
           <Card>
