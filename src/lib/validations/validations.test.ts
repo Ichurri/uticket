@@ -78,20 +78,82 @@ describe("password schemas", () => {
 });
 
 describe("venueSchema", () => {
-  const base = { name: "Teatro", address: "Calle 1", city: "La Paz" };
+  const base = {
+    name: "Teatro",
+    address: "Calle 1",
+    city: "La Paz",
+    isPublic: false,
+  };
+  const floor = (zones: unknown[]) => ({
+    floors: [{ name: "Planta baja", order: 0, zones }],
+  });
 
-  it("requires rows/seatsPerRow for numbered zones", () => {
+  it("requires at least one seat for a SEATED zone", () => {
     const result = venueSchema.safeParse({
       ...base,
-      zones: [{ name: "VIP", priceMultiplier: 1.5, numbered: true }],
+      ...floor([{ name: "VIP", type: "SEATED", posX: 0, posY: 0 }]),
     });
     expect(result.success).toBe(false);
   });
 
-  it("requires capacity for free zones", () => {
+  it("requires a capacity for a GENERAL zone", () => {
     const result = venueSchema.safeParse({
       ...base,
-      zones: [{ name: "General", priceMultiplier: 1, numbered: false }],
+      ...floor([{ name: "General", type: "GENERAL", posX: 0, posY: 0 }]),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("requires at least one table for a TABLES zone", () => {
+    const result = venueSchema.safeParse({
+      ...base,
+      ...floor([{ name: "Mesas", type: "TABLES", posX: 0, posY: 0 }]),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects tables repeating a label within the same zone", () => {
+    const result = venueSchema.safeParse({
+      ...base,
+      ...floor([
+        {
+          name: "Mesas",
+          type: "TABLES",
+          posX: 0,
+          posY: 0,
+          tables: [
+            { label: "M1", seats: 8, posX: 0, posY: 0 },
+            { label: "m1", seats: 6, posX: 80, posY: 0 },
+          ],
+        },
+      ]),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects seats repeating row and number", () => {
+    const result = venueSchema.safeParse({
+      ...base,
+      ...floor([
+        {
+          name: "Platea",
+          type: "SEATED",
+          posX: 0,
+          posY: 0,
+          seats: [
+            { row: "A", number: 1, posX: 0, posY: 0 },
+            { row: "A", number: 1, posX: 28, posY: 0 },
+          ],
+        },
+      ]),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an unknown zone type", () => {
+    const result = venueSchema.safeParse({
+      ...base,
+      ...floor([{ name: "Raro", type: "BOXES", posX: 0, posY: 0 }]),
     });
     expect(result.success).toBe(false);
   });
@@ -99,22 +161,23 @@ describe("venueSchema", () => {
   it("coerces numeric strings from forms", () => {
     const result = venueSchema.parse({
       ...base,
-      zones: [
+      ...floor([
         {
-          name: "VIP",
-          priceMultiplier: "1.5",
-          numbered: true,
-          rows: "3",
-          seatsPerRow: "4",
+          name: "Mesas",
+          type: "TABLES",
+          posX: "0",
+          posY: "0",
+          tables: [{ label: "M1", seats: "8", posX: "20", posY: "20" }],
         },
-      ],
+      ]),
     });
-    expect(result.zones[0].rows).toBe(3);
-    expect(result.zones[0].priceMultiplier).toBe(1.5);
+    const zone = result.floors[0].zones[0];
+    expect(zone.tables?.[0].seats).toBe(8);
+    expect(zone.posX).toBe(0);
   });
 
-  it("requires at least one zone", () => {
-    expect(venueSchema.safeParse({ ...base, zones: [] }).success).toBe(false);
+  it("requires at least one floor", () => {
+    expect(venueSchema.safeParse({ ...base, floors: [] }).success).toBe(false);
   });
 });
 
@@ -126,11 +189,11 @@ describe("eventSchema", () => {
     date: "2026-09-10",
     time: "20:30",
     venueId: "v1",
-    price: "45",
+    basePrice: "45",
   };
 
   it("accepts valid data and coerces price", () => {
-    expect(eventSchema.parse(valid).price).toBe(45);
+    expect(eventSchema.parse(valid).basePrice).toBe(45);
   });
 
   it("rejects malformed date and time", () => {
@@ -190,8 +253,7 @@ describe("createOrderSchema", () => {
     expect(
       createOrderSchema.safeParse({
         eventId: "e1",
-        seatIds: [],
-        zones: [{ zoneId: "z1", quantity: 11 }],
+        zones: [{ eventZoneId: "ez1", quantity: 11 }],
       }).success,
     ).toBe(false);
   });
@@ -200,8 +262,30 @@ describe("createOrderSchema", () => {
     const parsed = createOrderSchema.parse({
       eventId: "e1",
       seatIds: ["s1", "s2"],
-      zones: [{ zoneId: "z1", quantity: 2 }],
+      zones: [{ eventZoneId: "ez1", quantity: 2 }],
     });
     expect(parsed.seatIds).toHaveLength(2);
+    expect(parsed.tables).toEqual([]);
+  });
+
+  it("accepts an order made only of tables", () => {
+    const parsed = createOrderSchema.parse({
+      eventId: "e1",
+      tables: [{ eventTableId: "et1" }, { eventTableId: "et2", seats: 2 }],
+    });
+    expect(parsed.tables).toHaveLength(2);
+    expect(parsed.tables[1].seats).toBe(2);
+    expect(parsed.seatIds).toEqual([]);
+  });
+
+  it("caps tables at 5 per order", () => {
+    expect(
+      createOrderSchema.safeParse({
+        eventId: "e1",
+        tables: Array.from({ length: 6 }, (_, i) => ({
+          eventTableId: `et${i}`,
+        })),
+      }).success,
+    ).toBe(false);
   });
 });

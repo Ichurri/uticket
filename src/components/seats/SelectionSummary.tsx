@@ -49,7 +49,7 @@ export function SelectionSummary({ eventId }: { eventId: string }) {
       <CardContent className="flex flex-col gap-3">
         {shownItems.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Elegí tus asientos o la cantidad de boletos por zona.
+            Elegí tus asientos, una mesa o la cantidad de boletos por zona.
           </p>
         ) : (
           <>
@@ -59,6 +59,9 @@ export function SelectionSummary({ eventId }: { eventId: string }) {
                   <span className="text-muted-foreground">
                     {item.label}
                     {item.quantity > 1 ? ` × ${item.quantity}` : ""}
+                    {item.admits
+                      ? ` · ${item.admits} entrada${item.admits === 1 ? "" : "s"}`
+                      : ""}
                   </span>
                   <span className="font-medium tabular-nums">
                     {formatCurrency(item.unitPrice * item.quantity)}

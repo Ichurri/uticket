@@ -23,6 +23,7 @@ export function FreeZoneSelector({
       ? (state.items.find((item) => item.key === zone.id)?.quantity ?? 0)
       : 0,
   );
+  // zone.id IS the EventZone id — the commercial row the buyer buys from
 
   const shownQuantity = hydrated ? quantity : 0;
   const soldOut = zone.available <= 0;
@@ -31,7 +32,7 @@ export function FreeZoneSelector({
   function update(delta: number) {
     setZoneQuantity(
       { eventId, eventTitle },
-      { zoneId: zone.id, label: zone.name, unitPrice: zone.price },
+      { eventZoneId: zone.id, label: zone.name, unitPrice: zone.price },
       Math.min(shownQuantity + delta, maxQuantity),
     );
   }

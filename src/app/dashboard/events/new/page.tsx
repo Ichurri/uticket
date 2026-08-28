@@ -16,7 +16,7 @@ export default async function NewEventPage() {
   const session = await auth();
 
   const venues = await prisma.venue.findMany({
-    where: { organizerId: session!.user.id },
+    where: { ownerId: session!.user.id },
     select: { id: true, name: true, city: true },
     orderBy: { createdAt: "desc" },
   });

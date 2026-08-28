@@ -26,11 +26,13 @@ vi.mock("@/lib/api-auth", async () => {
 import { POST as createOrder } from "@/app/api/orders/route";
 import { prisma } from "@/lib/prisma";
 import { expireStaleOrders } from "@/lib/orders";
+import { releaseOrderHolds } from "@/lib/seats";
 import {
   cleanDatabase,
   createApprovedEvent,
   createBuyer,
   createEventAtVenue,
+  putZoneOnSale,
   jsonRequest,
 } from "./helpers";
 
@@ -49,14 +51,14 @@ beforeEach(async () => {
 describe("POST /api/orders", () => {
   it("creates a pending order in a free-capacity zone", async () => {
     const buyer = await createBuyer();
-    const { event, zone } = await createApprovedEvent();
+    const { event, eventZone } = await createApprovedEvent();
     actAs({ id: buyer.id, role: "BUYER" });
 
     const response = await createOrder(
       orderRequest({
         eventId: event.id,
         seatIds: [],
-        zones: [{ zoneId: zone.id, quantity: 2 }],
+        zones: [{ eventZoneId: eventZone.id, quantity: 2 }],
       }),
     );
     expect(response.status).toBe(201);
@@ -70,14 +72,14 @@ describe("POST /api/orders", () => {
 
   it("rejects orders exceeding the zone capacity", async () => {
     const buyer = await createBuyer();
-    const { event, zone } = await createApprovedEvent({ freeZoneCapacity: 3 });
+    const { event, eventZone } = await createApprovedEvent({ freeZoneCapacity: 3 });
     actAs({ id: buyer.id, role: "BUYER" });
 
     const response = await createOrder(
       orderRequest({
         eventId: event.id,
         seatIds: [],
-        zones: [{ zoneId: zone.id, quantity: 4 }],
+        zones: [{ eventZoneId: eventZone.id, quantity: 4 }],
       }),
     );
     expect(response.status).toBe(409);
@@ -85,14 +87,14 @@ describe("POST /api/orders", () => {
 
   it("requires a verified email", async () => {
     const buyer = await createBuyer({ verified: false });
-    const { event, zone } = await createApprovedEvent();
+    const { event, eventZone } = await createApprovedEvent();
     actAs({ id: buyer.id, role: "BUYER" });
 
     const response = await createOrder(
       orderRequest({
         eventId: event.id,
         seatIds: [],
-        zones: [{ zoneId: zone.id, quantity: 1 }],
+        zones: [{ eventZoneId: eventZone.id, quantity: 1 }],
       }),
     );
     expect(response.status).toBe(403);
@@ -100,7 +102,7 @@ describe("POST /api/orders", () => {
 
   it("caps unpaid orders per buyer at 3", async () => {
     const buyer = await createBuyer();
-    const { event, zone } = await createApprovedEvent({ freeZoneCapacity: 100 });
+    const { event, eventZone } = await createApprovedEvent({ freeZoneCapacity: 100 });
     actAs({ id: buyer.id, role: "BUYER" });
 
     for (let i = 0; i < 3; i++) {
@@ -108,7 +110,7 @@ describe("POST /api/orders", () => {
         orderRequest({
           eventId: event.id,
           seatIds: [],
-          zones: [{ zoneId: zone.id, quantity: 1 }],
+          zones: [{ eventZoneId: eventZone.id, quantity: 1 }],
         }),
       );
       expect(ok.status).toBe(201);
@@ -117,7 +119,7 @@ describe("POST /api/orders", () => {
       orderRequest({
         eventId: event.id,
         seatIds: [],
-        zones: [{ zoneId: zone.id, quantity: 1 }],
+        zones: [{ eventZoneId: eventZone.id, quantity: 1 }],
       }),
     );
     expect(blocked.status).toBe(429);
@@ -126,7 +128,7 @@ describe("POST /api/orders", () => {
 
 describe("availability is scoped per event, not per venue", () => {
   it("keeps a seat sold for one event available for another event at the same venue", async () => {
-    const { event, venue, organizer, seats } = await createApprovedEvent({
+    const { event, venue, organizer, zone, seats } = await createApprovedEvent({
       numbered: true,
     });
     const sameVenueEvent = await createEventAtVenue({
@@ -134,6 +136,8 @@ describe("availability is scoped per event, not per venue", () => {
       organizerId: organizer.id,
       title: "Segunda función",
     });
+    // Each event puts the room on sale for itself — that IS the separation
+    await putZoneOnSale(sameVenueEvent.id, zone.id);
 
     const firstBuyer = await createBuyer();
     actAs({ id: firstBuyer.id, role: "BUYER" });
@@ -156,7 +160,7 @@ describe("availability is scoped per event, not per venue", () => {
   });
 
   it("counts free-zone capacity separately for each event at the venue", async () => {
-    const { event, venue, organizer, zone } = await createApprovedEvent({
+    const { event, venue, organizer, zone, eventZone } = await createApprovedEvent({
       freeZoneCapacity: 2,
     });
     const sameVenueEvent = await createEventAtVenue({
@@ -164,11 +168,12 @@ describe("availability is scoped per event, not per venue", () => {
       organizerId: organizer.id,
       title: "Segunda función",
     });
+    const secondEventZone = await putZoneOnSale(sameVenueEvent.id, zone.id);
 
     const firstBuyer = await createBuyer();
     actAs({ id: firstBuyer.id, role: "BUYER" });
     const soldOutFirst = await createOrder(
-      orderRequest({ eventId: event.id, seatIds: [], zones: [{ zoneId: zone.id, quantity: 2 }] }),
+      orderRequest({ eventId: event.id, seatIds: [], zones: [{ eventZoneId: eventZone.id, quantity: 2 }] }),
     );
     expect(soldOutFirst.status).toBe(201);
 
@@ -179,14 +184,14 @@ describe("availability is scoped per event, not per venue", () => {
       orderRequest({
         eventId: sameVenueEvent.id,
         seatIds: [],
-        zones: [{ zoneId: zone.id, quantity: 2 }],
+        zones: [{ eventZoneId: secondEventZone.id, quantity: 2 }],
       }),
     );
     expect(second.status).toBe(201);
 
     // ...but the first one really is sold out.
     const third = await createOrder(
-      orderRequest({ eventId: event.id, seatIds: [], zones: [{ zoneId: zone.id, quantity: 1 }] }),
+      orderRequest({ eventId: event.id, seatIds: [], zones: [{ eventZoneId: eventZone.id, quantity: 1 }] }),
     );
     expect(third.status).toBe(409);
   });
@@ -222,10 +227,19 @@ describe("availability is scoped per event, not per venue", () => {
       ).status,
     ).toBe(201);
 
-    await prisma.order.updateMany({
+    const cancelled = await prisma.order.findFirstOrThrow({
       where: { buyerId: firstBuyer.id },
+      select: { id: true },
+    });
+    await prisma.order.update({
+      where: { id: cancelled.id },
       data: { status: "CANCELLED" },
     });
+    // Availability is a stored EventSeat row now, so cancelling the order is
+    // no longer the release on its own — someone has to hand the seat back.
+    // Every real cancel path (buyer, organizer, expiry, event cancellation)
+    // calls this; doing it here keeps the test on the same road.
+    await releaseOrderHolds([cancelled.id]);
 
     const secondBuyer = await createBuyer();
     actAs({ id: secondBuyer.id, role: "BUYER" });

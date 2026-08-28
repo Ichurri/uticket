@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { sumVenueCapacity, venueCapacitySelect } from "@/lib/venue-zones";
 import { buttonVariants } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent } from "@/components/ui/Card";
@@ -13,20 +14,19 @@ export const metadata: Metadata = {
   title: "Mis venues",
 };
 
-const seatMapTypeLabels = {
-  ZONE: "Por zonas",
-  NUMBERED: "Asientos numerados",
-  BOTH: "Mixto",
-} as const;
+/** Zones live under floors now; the card still shows one flat number. */
+function zoneCount(venue: { floors: { zones: unknown[] }[] }) {
+  return venue.floors.reduce((sum, floor) => sum + floor.zones.length, 0);
+}
 
 export default async function VenuesPage() {
   const session = await auth();
 
   const venues = await prisma.venue.findMany({
-    where: { organizerId: session!.user.id },
+    where: { ownerId: session!.user.id },
     include: {
-      zones: { select: { id: true } },
-      _count: { select: { events: true } },
+      ...venueCapacitySelect,
+      _count: { select: { events: true, floors: true } },
     },
     orderBy: { createdAt: "desc" },
   });
@@ -69,17 +69,26 @@ export default async function VenuesPage() {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="font-semibold">{venue.name}</h2>
-                    <Badge variant="primary">
-                      {seatMapTypeLabels[venue.seatMapType]}
-                    </Badge>
+                    {venue._count.floors > 1 && (
+                      <Badge variant="primary">
+                        {venue._count.floors} pisos
+                      </Badge>
+                    )}
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    {venue.address}, {venue.city} · {venue.capacity} personas ·{" "}
-                    {venue.zones.length} zona{venue.zones.length === 1 ? "" : "s"} ·{" "}
-                    {venue._count.events} evento{venue._count.events === 1 ? "" : "s"}
+                    {venue.address}, {venue.city} · {sumVenueCapacity(venue)}{" "}
+                    personas · {zoneCount(venue)} zona
+                    {zoneCount(venue) === 1 ? "" : "s"} · {venue._count.events}{" "}
+                    evento{venue._count.events === 1 ? "" : "s"}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <Link
+                    href={`/dashboard/venues/${venue.id}/editor`}
+                    className={buttonVariants({ variant: "outline", size: "sm" })}
+                  >
+                    Plano
+                  </Link>
                   <Link
                     href={`/dashboard/venues/${venue.id}/edit`}
                     className={buttonVariants({ variant: "outline", size: "sm" })}

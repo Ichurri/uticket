@@ -1,7 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
-import type { OrderStatus } from "@/generated/prisma/enums";
-import type { SeatStatusDto } from "@/types/seat-map";
+import type { OrderStatus, SaleStatus } from "@/generated/prisma/enums";
 
 /** Orders that still hold inventory: waiting for payment, in review, or paid.
  * Everything else (CANCELLED) has released whatever it was holding. */
@@ -12,30 +11,42 @@ export const LIVE_ORDER_STATUSES: OrderStatus[] = [
 ];
 
 /**
- * Availability is always per EVENT, never per venue.
+ * Availability lives in the COMMERCIAL layer, one row per event.
  *
- * A venue's seats are shared by every event held there (a theatre runs the
- * same seat map on Friday and on Saturday), so a seat cannot carry a global
- * status: it is occupied *for one event* when a live order of that event
- * holds it. Free-capacity zones already worked this way; numbered seats now
- * follow the same rule, from the same query.
+ * The physical layer (Venue → Floor → Zone → Table/Seat) is geometry only and
+ * is reused by every event held there. What is taken is recorded on
+ * `EventTable` / `EventSeat`, which exist per event — so a table sold on
+ * Friday stays free for Saturday's show in the same room.
+ *
+ * GENERAL zones have no per-spot row (there is nothing to point at), so their
+ * occupancy is still counted from the order items of that event's live orders.
  */
 export interface EventInventory {
-  /** seatId → how this event's orders hold it (paid = SOLD, otherwise RESERVED) */
-  seatHolds: Map<string, Exclude<SeatStatusDto, "AVAILABLE">>;
-  /** zoneId → tickets already committed in that free-capacity zone */
-  freeZoneTaken: Map<string, number>;
+  /** eventTableId → its sale status for this event */
+  tableStatus: Map<string, SaleStatus>;
+  /** eventTableId → spots taken, only meaningful in PER_SEAT mode */
+  tableSeatsSold: Map<string, number>;
+  /** physical seatId → its sale status; absent means AVAILABLE */
+  seatStatus: Map<string, SaleStatus>;
+  /** eventZoneId → tickets already committed in that GENERAL zone */
+  generalTaken: Map<string, number>;
 }
 
 function emptyInventory(): EventInventory {
-  return { seatHolds: new Map(), freeZoneTaken: new Map() };
+  return {
+    tableStatus: new Map(),
+    tableSeatsSold: new Map(),
+    seatStatus: new Map(),
+    generalTaken: new Map(),
+  };
 }
 
 /** Reads run inside the order transaction too, so the client is injectable. */
-type Client = Pick<Prisma.TransactionClient, "orderItem">;
+type Client = Pick<
+  Prisma.TransactionClient,
+  "orderItem" | "eventTable" | "eventSeat" | "eventZone"
+>;
 
-/** Inventory held by live orders, keyed by event. Events with nothing sold
- * still get an entry, so callers never have to null-check. */
 export async function getInventoryByEvent(
   eventIds: string[],
   client: Client = prisma,
@@ -43,33 +54,59 @@ export async function getInventoryByEvent(
   const byEvent = new Map(eventIds.map((id) => [id, emptyInventory()]));
   if (eventIds.length === 0) return byEvent;
 
-  const items = await client.orderItem.findMany({
-    where: {
-      order: { eventId: { in: eventIds }, status: { in: LIVE_ORDER_STATUSES } },
-    },
-    select: {
-      seatId: true,
-      zoneId: true,
-      quantity: true,
-      order: { select: { eventId: true, status: true } },
-    },
-  });
+  const [tables, seats, generalItems] = await Promise.all([
+    client.eventTable.findMany({
+      where: { eventZone: { eventId: { in: eventIds } } },
+      select: {
+        id: true,
+        status: true,
+        seatsSold: true,
+        eventZone: { select: { eventId: true } },
+      },
+    }),
+    client.eventSeat.findMany({
+      where: { eventZone: { eventId: { in: eventIds } } },
+      select: {
+        seatId: true,
+        status: true,
+        eventZone: { select: { eventId: true } },
+      },
+    }),
+    client.orderItem.findMany({
+      where: {
+        eventTableId: null,
+        eventSeatId: null,
+        eventZoneId: { not: null },
+        order: { eventId: { in: eventIds }, status: { in: LIVE_ORDER_STATUSES } },
+      },
+      select: {
+        eventZoneId: true,
+        quantity: true,
+        order: { select: { eventId: true } },
+      },
+    }),
+  ]);
 
-  for (const item of items) {
-    const inventory = byEvent.get(item.order.eventId);
+  for (const table of tables) {
+    const inventory = byEvent.get(table.eventZone.eventId);
     if (!inventory) continue;
-    if (item.seatId) {
-      // A paid seat reads as SOLD; one still being paid for reads as RESERVED.
-      inventory.seatHolds.set(
-        item.seatId,
-        item.order.status === "CONFIRMED" ? "SOLD" : "RESERVED",
-      );
-    } else if (item.zoneId) {
-      inventory.freeZoneTaken.set(
-        item.zoneId,
-        (inventory.freeZoneTaken.get(item.zoneId) ?? 0) + item.quantity,
-      );
-    }
+    inventory.tableStatus.set(table.id, table.status);
+    inventory.tableSeatsSold.set(table.id, table.seatsSold);
+  }
+
+  for (const seat of seats) {
+    const inventory = byEvent.get(seat.eventZone.eventId);
+    if (!inventory) continue;
+    inventory.seatStatus.set(seat.seatId, seat.status);
+  }
+
+  for (const item of generalItems) {
+    const inventory = byEvent.get(item.order.eventId);
+    if (!inventory || !item.eventZoneId) continue;
+    inventory.generalTaken.set(
+      item.eventZoneId,
+      (inventory.generalTaken.get(item.eventZoneId) ?? 0) + item.quantity,
+    );
   }
 
   return byEvent;
@@ -83,26 +120,98 @@ export async function getEventInventory(
   return byEvent.get(eventId) ?? emptyInventory();
 }
 
+/** A spot is off the market unless it is explicitly AVAILABLE. */
+export function isTaken(status: SaleStatus | undefined) {
+  return status !== undefined && status !== "AVAILABLE";
+}
+
 /**
- * Seats of this event that a live order already holds, out of the given set.
- * Used to reject a purchase before creating the order; the surrounding
- * Serializable transaction is what makes it safe against a concurrent buyer
- * grabbing the same seat (the loser aborts with P2034 → 409).
+ * Expired checkout holds go back on sale. The stored status means someone has
+ * to put it back — unlike the old derived model, where cancelling the order
+ * was the release. Runs lazily before reads/writes and from the cron.
  */
-export async function findTakenSeatIds(
-  eventId: string,
-  seatIds: string[],
-  client: Client = prisma,
-): Promise<string[]> {
-  if (seatIds.length === 0) return [];
-  const held = await client.orderItem.findMany({
-    where: {
-      seatId: { in: seatIds },
-      order: { eventId, status: { in: LIVE_ORDER_STATUSES } },
-    },
-    select: { seatId: true },
+export async function releaseExpiredHolds(client: Client = prisma) {
+  const now = new Date();
+  // Only the status is swept here. `seatsSold` is accounting that belongs to
+  // specific orders, so it is adjusted in releaseOrderHolds, never blanked.
+  const [tables, seats] = await Promise.all([
+    client.eventTable.updateMany({
+      where: { status: "HELD", heldUntil: { lt: now } },
+      data: { status: "AVAILABLE", heldUntil: null },
+    }),
+    client.eventSeat.updateMany({
+      where: { status: "HELD", heldUntil: { lt: now } },
+      data: { status: "AVAILABLE", heldUntil: null },
+    }),
+  ]);
+  return tables.count + seats.count;
+}
+
+/**
+ * Put back everything the given orders were holding. Call this wherever an
+ * order stops being live (expiry, buyer cancel, organizer reject, event
+ * cancellation) — the commercial rows do not release themselves.
+ */
+export async function releaseOrderHolds(
+  orderIds: string[],
+  client: Pick<
+    Prisma.TransactionClient,
+    "orderItem" | "eventTable" | "eventSeat"
+  > = prisma,
+) {
+  if (orderIds.length === 0) return;
+
+  const items = await client.orderItem.findMany({
+    where: { orderId: { in: orderIds } },
+    select: { eventTableId: true, eventSeatId: true, seatsQuantity: true },
   });
-  return held
-    .map((item) => item.seatId)
-    .filter((seatId): seatId is string => seatId !== null);
+
+  // Give back the spots each line took inside a PER_SEAT table
+  const seatsBackByTable = new Map<string, number>();
+  for (const item of items) {
+    if (!item.eventTableId || !item.seatsQuantity) continue;
+    seatsBackByTable.set(
+      item.eventTableId,
+      (seatsBackByTable.get(item.eventTableId) ?? 0) + item.seatsQuantity,
+    );
+  }
+  for (const [tableId, seatsBack] of seatsBackByTable) {
+    await client.eventTable.update({
+      where: { id: tableId },
+      data: { seatsSold: { decrement: seatsBack } },
+    });
+  }
+
+  const wholeTableIds = items
+    .filter((item) => item.eventTableId && !item.seatsQuantity)
+    .map((item) => item.eventTableId as string);
+  const seatIds = items
+    .map((item) => item.eventSeatId)
+    .filter((id): id is string => id !== null);
+
+  if (wholeTableIds.length > 0) {
+    await client.eventTable.updateMany({
+      where: { id: { in: wholeTableIds } },
+      data: { status: "AVAILABLE", heldUntil: null },
+    });
+  }
+  // A PER_SEAT table only reopens once it has room again
+  for (const tableId of seatsBackByTable.keys()) {
+    const table = await client.eventTable.findUnique({
+      where: { id: tableId },
+      select: { seatsSold: true },
+    });
+    if (table && table.seatsSold <= 0) {
+      await client.eventTable.update({
+        where: { id: tableId },
+        data: { status: "AVAILABLE", heldUntil: null, seatsSold: 0 },
+      });
+    }
+  }
+  if (seatIds.length > 0) {
+    await client.eventSeat.updateMany({
+      where: { id: { in: seatIds } },
+      data: { status: "AVAILABLE", heldUntil: null },
+    });
+  }
 }

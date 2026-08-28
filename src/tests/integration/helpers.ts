@@ -4,7 +4,7 @@ import { eventDate } from "@/lib/utils";
 
 export async function cleanDatabase() {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "Ticket", "OrderItem", "Order", "Seat", "Zone", "Event", "Venue", "VerificationToken", "Session", "Account", "PlatformSettings", "User" CASCADE',
+    'TRUNCATE TABLE "Ticket", "OrderItem", "Order", "EventSeat", "EventTable", "EventZone", "Seat", "Table", "Zone", "Floor", "Event", "Venue", "VerificationToken", "Session", "Account", "PlatformSettings", "User" CASCADE',
   );
 }
 
@@ -23,6 +23,9 @@ export async function createBuyer({ verified = true } = {}) {
   });
 }
 
+/** Base price used by every helper-built event zone. */
+export const TEST_ZONE_PRICE = 100;
+
 export async function createApprovedEvent({
   freeZoneCapacity = 10,
   numbered = false,
@@ -40,18 +43,20 @@ export async function createApprovedEvent({
       name: "Venue Test",
       address: "Calle Falsa 123",
       city: "La Paz",
-      capacity: numbered ? 4 : freeZoneCapacity,
-      seatMapType: numbered ? "NUMBERED" : "ZONE",
-      organizerId: organizer.id,
+      ownerId: organizer.id,
+      // Every venue always has at least a ground floor
+      floors: { create: { name: "Planta baja", order: 0 } },
     },
+    include: { floors: true },
   });
+  const floor = venue.floors[0];
+
   const zone = await prisma.zone.create({
     data: {
       name: "General",
-      capacity: numbered ? 4 : freeZoneCapacity,
-      priceMultiplier: 1,
-      venueId: venue.id,
-      ...(numbered ? { rows: 2, seatsPerRow: 2 } : {}),
+      type: numbered ? "SEATED" : "GENERAL",
+      capacity: numbered ? null : freeZoneCapacity,
+      floorId: floor.id,
     },
   });
   const seats = numbered
@@ -68,7 +73,40 @@ export async function createApprovedEvent({
     venueId: venue.id,
     organizerId: organizer.id,
   });
-  return { organizer, venue, zone, seats, event };
+  const eventZone = await putZoneOnSale(event.id, zone.id);
+  return { organizer, venue, floor, zone, eventZone, seats, event };
+}
+
+/** Puts one physical zone on sale for one event, tables included. */
+export async function putZoneOnSale(
+  eventId: string,
+  zoneId: string,
+  price = TEST_ZONE_PRICE,
+  extra: { tableSaleMode?: "WHOLE_TABLE" | "PER_SEAT"; seatPrice?: number } = {},
+) {
+  const zone = await prisma.zone.findUniqueOrThrow({
+    where: { id: zoneId },
+    select: { type: true, capacity: true, tables: { select: { id: true } } },
+  });
+  const eventZone = await prisma.eventZone.create({
+    data: {
+      eventId,
+      zoneId,
+      price,
+      capacityForSale: zone.type === "GENERAL" ? zone.capacity : null,
+      tableSaleMode: extra.tableSaleMode ?? "WHOLE_TABLE",
+      seatPrice: extra.seatPrice ?? null,
+    },
+  });
+  if (zone.tables.length > 0) {
+    await prisma.eventTable.createMany({
+      data: zone.tables.map((table) => ({
+        eventZoneId: eventZone.id,
+        tableId: table.id,
+      })),
+    });
+  }
+  return eventZone;
 }
 
 /** A second (third, ...) event in an existing venue — the case that used to
@@ -90,7 +128,6 @@ export function createEventAtVenue({
       date: eventDate(futureDateString()),
       time: "20:00",
       status: "APPROVED",
-      price: 100,
       paymentQrImage: "/uploads/qr-test.png",
       venueId,
       organizerId,
@@ -104,4 +141,20 @@ export function jsonRequest(url: string, body: unknown) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+/** A TABLES zone with two tables: "M1" (4 seats) and "M2" (2 seats),
+ * attached to an existing floor so a test can mix it with whatever that
+ * venue already has. */
+export async function createTableZone(floorId: string) {
+  const zone = await prisma.zone.create({
+    data: { name: "Mesas", type: "TABLES", floorId },
+  });
+  const tables = await prisma.table.createManyAndReturn({
+    data: [
+      { label: "M1", seats: 4, posX: 20, posY: 20, zoneId: zone.id },
+      { label: "M2", seats: 2, posX: 100, posY: 20, zoneId: zone.id },
+    ],
+  });
+  return { zone, tables };
 }

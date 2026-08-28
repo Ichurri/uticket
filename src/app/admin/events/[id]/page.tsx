@@ -24,7 +24,30 @@ async function getEvent(id: string) {
     include: {
       organizer: { select: { name: true, email: true, phone: true } },
       venue: {
-        select: { name: true, address: true, city: true, capacity: true },
+        select: {
+          name: true,
+          address: true,
+          city: true,
+          // Capacity is derived from the layout now, not stored on the venue
+          floors: {
+            select: {
+              zones: {
+                select: {
+                  type: true,
+                  capacity: true,
+                  tables: { select: { seats: true } },
+                  _count: { select: { seats: true } },
+                },
+              },
+            },
+          },
+        },
+      },
+      // Prices live per zone now, so the reviewer sees the real range
+      eventZones: {
+        where: { isEnabled: true },
+        select: { price: true, zone: { select: { name: true } } },
+        orderBy: { price: "asc" },
       },
     },
   });
@@ -45,6 +68,21 @@ export default async function AdminEventDetailPage({ params }: PageProps) {
   const { id } = await params;
   const event = await getEvent(id);
   if (!event) notFound();
+
+  // Physical capacity, summed from the layout: headcount for GENERAL zones,
+  // table seats for TABLES, seat rows for SEATED.
+  const venueCapacity = event.venue.floors.reduce(
+    (total, floor) =>
+      total +
+      floor.zones.reduce((sum, zone) => {
+        if (zone.type === "TABLES") {
+          return sum + zone.tables.reduce((s, table) => s + table.seats, 0);
+        }
+        if (zone.type === "SEATED") return sum + zone._count.seats;
+        return sum + (zone.capacity ?? 0);
+      }, 0),
+    0,
+  );
 
   const statusInfo = EVENT_STATUS_LABELS[event.status];
 
@@ -106,7 +144,7 @@ export default async function AdminEventDetailPage({ params }: PageProps) {
                 {event.venue.address}, {event.venue.city}
               </p>
               <p className="text-muted-foreground">
-                Capacidad: {event.venue.capacity} personas
+                Capacidad: {venueCapacity} personas
               </p>
             </CardContent>
           </Card>
@@ -137,11 +175,25 @@ export default async function AdminEventDetailPage({ params }: PageProps) {
                 <MapPinIcon className="h-4 w-4 shrink-0" />
                 {event.venue.name} ({event.venue.city})
               </div>
-              <div className="flex items-center justify-between border-t border-border pt-3">
-                <span className="text-muted-foreground">Precio base</span>
-                <span className="font-semibold">
-                  {formatCurrency(Number(event.price))}
-                </span>
+              <div className="flex flex-col gap-1 border-t border-border pt-3">
+                <span className="text-muted-foreground">Precios por zona</span>
+                {event.eventZones.length === 0 ? (
+                  <span className="text-sm text-muted-foreground">
+                    Todavía sin zonas a la venta
+                  </span>
+                ) : (
+                  event.eventZones.map((eventZone) => (
+                    <div
+                      key={eventZone.zone.name}
+                      className="flex items-center justify-between"
+                    >
+                      <span className="text-sm">{eventZone.zone.name}</span>
+                      <span className="font-semibold">
+                        {formatCurrency(Number(eventZone.price))}
+                      </span>
+                    </div>
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>

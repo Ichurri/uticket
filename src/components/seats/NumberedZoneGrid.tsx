@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn, formatCurrency } from "@/lib/utils";
 import { useCartStore } from "@/stores/cart-store";
 import { useHydrated } from "@/lib/use-hydrated";
+import { seatCartLabel, seatIsTaken } from "@/lib/seat-map-view";
 import type { SeatDto, ZoneDto } from "@/types/seat-map";
 
 export function NumberedZoneGrid({
@@ -62,9 +63,10 @@ export function NumberedZoneGrid({
     switch (seat.status) {
       case "AVAILABLE":
         return "border-border bg-card text-card-foreground hover:border-primary hover:text-primary";
-      case "RESERVED":
+      case "HELD":
         return "cursor-not-allowed border-transparent bg-accent/30 text-muted-foreground";
       case "SOLD":
+      case "BLOCKED":
         return "cursor-not-allowed border-transparent bg-muted text-muted-foreground/45";
     }
   }
@@ -91,7 +93,7 @@ export function NumberedZoneGrid({
                   .sort((a, b) => a.number - b.number)
                   .map((seat) => {
                     const selected = hydrated && selectedKeys.has(seat.id);
-                    const disabled = seat.status !== "AVAILABLE";
+                    const disabled = seatIsTaken(seat);
                     return (
                       <button
                         key={seat.id}
@@ -109,9 +111,9 @@ export function NumberedZoneGrid({
                             { eventId, eventTitle },
                             {
                               seatId: seat.id,
-                              zoneId: zone.id,
-                              label: `${zone.name} · Asiento ${seat.row}${seat.number}`,
-                              unitPrice: zone.price,
+                              eventZoneId: zone.id,
+                              label: seatCartLabel(zone, seat),
+                              unitPrice: seat.price,
                             },
                           )
                         }

@@ -3,6 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { sumVenueCapacity, venueCapacitySelect } from "@/lib/venue-zones";
 import { cn, formatShortDate } from "@/lib/utils";
 import { EVENT_STATUS_LABELS } from "@/lib/constants";
 import type { Prisma } from "@/generated/prisma/client";
@@ -111,7 +112,7 @@ export default async function DashboardEventsPage({
   const events = await prisma.event.findMany({
     where,
     include: {
-      venue: { select: { name: true, city: true, capacity: true } },
+      venue: { select: { name: true, city: true, ...venueCapacitySelect } },
       _count: { select: { tickets: { where: { status: { not: "CANCELLED" } } } } },
     },
     orderBy: { createdAt: "desc" },
@@ -196,7 +197,7 @@ export default async function DashboardEventsPage({
               const statusInfo = EVENT_STATUS_LABELS[event.status];
               const editable =
                 event.status === "DRAFT" || event.status === "PENDING";
-              const capacity = event.venue.capacity;
+              const capacity = sumVenueCapacity(event.venue);
               const sold = event._count.tickets;
               const percent =
                 capacity > 0
@@ -274,7 +275,7 @@ export default async function DashboardEventsPage({
                   const statusInfo = EVENT_STATUS_LABELS[event.status];
                   const editable =
                     event.status === "DRAFT" || event.status === "PENDING";
-                  const capacity = event.venue.capacity;
+                  const capacity = sumVenueCapacity(event.venue);
                   const sold = event._count.tickets;
                   const percent =
                     capacity > 0

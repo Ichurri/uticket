@@ -8,9 +8,9 @@ import {
 
 const event = { eventId: "e1", eventTitle: "Evento 1" };
 const otherEvent = { eventId: "e2", eventTitle: "Evento 2" };
-const seatA1 = { seatId: "s1", zoneId: "z1", label: "VIP · A1", unitPrice: 90 };
-const seatA2 = { seatId: "s2", zoneId: "z1", label: "VIP · A2", unitPrice: 90 };
-const general = { zoneId: "zg", label: "General", unitPrice: 60 };
+const seatA1 = { seatId: "s1", eventZoneId: "z1", label: "VIP · A1", unitPrice: 90 };
+const seatA2 = { seatId: "s2", eventZoneId: "z1", label: "VIP · A2", unitPrice: 90 };
+const general = { eventZoneId: "zg", label: "General", unitPrice: 60 };
 
 const state = () => useCartStore.getState();
 

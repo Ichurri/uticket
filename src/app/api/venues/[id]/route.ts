@@ -1,40 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, type AuthedSession } from "@/lib/api-auth";
+import { requireRole } from "@/lib/api-auth";
 import { venueSchema } from "@/lib/validations/venue";
-import {
-  seatMapTypeFor,
-  venueCapacity,
-  zoneCreateData,
-} from "@/lib/venue-zones";
+import { zoneCreateData } from "@/lib/venue-zones";
+import { resolveVenueLocation } from "@/lib/venue-location";
+import { findOwnVenue, venueHasSales } from "@/lib/venues";
 
 type RouteContext = { params: Promise<{ id: string }> };
-
-async function findOwnVenue(id: string, session: AuthedSession) {
-  const venue = await prisma.venue.findUnique({ where: { id } });
-  if (!venue) return { response: NextResponse.json({ error: "Venue no encontrado" }, { status: 404 }) };
-  if (venue.organizerId !== session.user.id && session.user.role !== "ADMIN") {
-    return { response: NextResponse.json({ error: "No tenés permisos sobre este venue" }, { status: 403 }) };
-  }
-  return { venue };
-}
-
-/** A venue is "locked" once any of its zones/seats appear in orders or tickets. */
-async function venueHasSales(venueId: string) {
-  const [orderItems, tickets] = await Promise.all([
-    prisma.orderItem.count({
-      where: {
-        OR: [{ zone: { venueId } }, { seat: { zone: { venueId } } }],
-      },
-    }),
-    prisma.ticket.count({
-      where: {
-        OR: [{ zone: { venueId } }, { seat: { zone: { venueId } } }],
-      },
-    }),
-  ]);
-  return orderItems + tickets > 0;
-}
 
 export async function PATCH(request: Request, { params }: RouteContext) {
   const { session, error } = await requireRole("ORGANIZER", "ADMIN");
@@ -53,32 +25,47 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     );
   }
 
+  const { floors, googleMapsUrl, latitude, longitude, ...data } = parsed.data;
+  const location = await resolveVenueLocation({
+    googleMapsUrl,
+    latitude,
+    longitude,
+  });
+
   if (await venueHasSales(id)) {
-    return NextResponse.json(
-      {
-        error:
-          "Este venue ya tiene ventas registradas y su estructura no puede modificarse",
-      },
-      { status: 409 },
-    );
+    // Details are still editable; the layout is not.
+    const venue = await prisma.venue.update({
+      where: { id },
+      data: { ...data, ...location },
+      include: { floors: { include: { zones: true } } },
+    });
+    return NextResponse.json({
+      venue,
+      warning:
+        "Este venue ya tiene ventas: se guardaron los datos pero no la distribución.",
+    });
   }
 
-  const { name, address, city, zones } = parsed.data;
-
-  // No sales yet: replace the zone/seat structure wholesale
+  // Nothing sold yet: replace the whole floor/zone structure
   const [, venue] = await prisma.$transaction([
-    prisma.zone.deleteMany({ where: { venueId: id } }),
+    prisma.floor.deleteMany({ where: { venueId: id } }),
     prisma.venue.update({
       where: { id },
       data: {
-        name,
-        address,
-        city,
-        capacity: venueCapacity(zones),
-        seatMapType: seatMapTypeFor(zones),
-        zones: { create: zoneCreateData(zones) },
+        ...data,
+        ...location,
+        floors: {
+          create: floors.map((floor, index) => ({
+            name: floor.name,
+            order: floor.order ?? index,
+            canvasWidth: floor.canvasWidth,
+            canvasHeight: floor.canvasHeight,
+            backgroundImage: floor.backgroundImage ?? null,
+            zones: { create: floor.zones.map(zoneCreateData) },
+          })),
+        },
       },
-      include: { zones: true },
+      include: { floors: { include: { zones: true } } },
     }),
   ]);
 

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api-auth";
 import { formatDate } from "@/lib/utils";
 import { buildTicketPdf } from "@/lib/ticket-pdf";
+import { ticketLabel } from "@/lib/order-items";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -26,8 +27,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
           venue: { select: { name: true, city: true } },
         },
       },
-      seat: { select: { row: true, number: true } },
-      zone: { select: { name: true } },
+
     },
   });
   if (
@@ -45,9 +45,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
     dateLabel: formatDate(ticket.event.date),
     timeLabel: `${ticket.event.time} hrs`,
     venueLabel: `${ticket.event.venue.name}, ${ticket.event.venue.city}`,
-    seatLabel: ticket.seat
-      ? `${ticket.zone?.name ?? ""} · Asiento ${ticket.seat.row}${ticket.seat.number}`
-      : (ticket.zone?.name ?? "Entrada general"),
+    seatLabel: ticketLabel(ticket),
     buyerName: ticket.order.buyer.name ?? ticket.order.buyer.email ?? "—",
     code: ticket.code,
     qrDataUrl: ticket.qrCode,

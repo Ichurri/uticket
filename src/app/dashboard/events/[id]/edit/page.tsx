@@ -19,7 +19,16 @@ export default async function EditEventPage({
   const { id } = await params;
   const session = await auth();
 
-  const event = await prisma.event.findUnique({ where: { id } });
+  const event = await prisma.event.findUnique({
+    where: { id },
+    include: {
+      eventZones: {
+        select: { price: true },
+        orderBy: { price: "asc" },
+        take: 1,
+      },
+    },
+  });
 
   if (
     !event ||
@@ -29,7 +38,7 @@ export default async function EditEventPage({
   }
 
   const venues = await prisma.venue.findMany({
-    where: { organizerId: event.organizerId },
+    where: { ownerId: event.organizerId },
     select: { id: true, name: true, city: true },
     orderBy: { createdAt: "desc" },
   });
@@ -42,7 +51,9 @@ export default async function EditEventPage({
     date: event.date.toISOString().slice(0, 10),
     time: event.time,
     venueId: event.venueId,
-    price: String(event.price),
+    // The form keeps one "precio base" that seeds newly generated zones; the
+    // real per-zone prices are edited in /dashboard/events/[id]/pricing.
+    basePrice: String(event.eventZones[0]?.price ?? 0),
     coverImage: event.coverImage,
     paymentQrImage: event.paymentQrImage,
   };

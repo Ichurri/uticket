@@ -2,12 +2,15 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api-auth";
 import { verifyTicketSchema } from "@/lib/validations/ticket";
+import { ticketLabel } from "@/lib/order-items";
 
 function ticketSummary(ticket: {
   code: string;
   event: { title: string; date: Date; time: string };
-  seat: { row: string; number: number } | null;
-  zone: { name: string } | null;
+  zoneName: string | null;
+  tableLabel: string | null;
+  seatLabel: string | null;
+  inclusionSummary: string | null;
   order: { buyer: { name: string | null; email: string | null } };
 }) {
   return {
@@ -15,9 +18,11 @@ function ticketSummary(ticket: {
     eventTitle: ticket.event.title,
     eventDate: ticket.event.date.toISOString(),
     eventTime: ticket.event.time,
-    label: ticket.seat
-      ? `${ticket.zone?.name ?? ""} · Asiento ${ticket.seat.row}${ticket.seat.number}`
-      : (ticket.zone?.name ?? "Entrada general"),
+    // Deliberately no group size here: one QR is always exactly one person,
+    // and a "8" next to a green VÁLIDO invites the door to wave in a table.
+    label: ticketLabel(ticket),
+    /// What the price included, so the door/bar can honour it
+    inclusion: ticket.inclusionSummary,
     buyerName: ticket.order.buyer.name ?? ticket.order.buyer.email ?? "—",
   };
 }
@@ -68,8 +73,6 @@ export async function POST(request: Request) {
           status: true,
         },
       },
-      seat: { select: { row: true, number: true } },
-      zone: { select: { name: true } },
       order: {
         select: { status: true, buyer: { select: { name: true, email: true } } },
       },

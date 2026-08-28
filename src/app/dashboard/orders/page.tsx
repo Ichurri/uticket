@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { orderItemInclude } from "@/lib/order-includes";
 import { expireStaleOrders } from "@/lib/orders";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { ORDER_STATUS_LABELS } from "@/lib/constants";
@@ -26,8 +27,7 @@ export default async function DashboardOrdersPage() {
       event: { select: { title: true } },
       items: {
         include: {
-          seat: { select: { row: true, number: true } },
-          zone: { select: { name: true } },
+        ...orderItemInclude,
         },
       },
       _count: { select: { tickets: true } },

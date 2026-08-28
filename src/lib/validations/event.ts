@@ -35,7 +35,9 @@ export const eventSchema = z.object({
     .string()
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Elegí una hora válida"),
   venueId: z.string().min(1, "Elegí un venue"),
-  price: z.coerce
+  /// Form-level only: it seeds every generated EventZone's price. The real
+  /// prices live on EventZone from then on (/dashboard/events/[id]/pricing).
+  basePrice: z.coerce
     .number("El precio debe ser un número")
     .positive("El precio debe ser mayor a 0")
     .max(100000, "El precio es demasiado alto"),

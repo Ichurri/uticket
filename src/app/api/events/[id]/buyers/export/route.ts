@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { orderItemInclude } from "@/lib/order-includes";
 import { requireRole } from "@/lib/api-auth";
 import { expireStaleOrders } from "@/lib/orders";
 import { csvLine } from "@/lib/csv";
@@ -36,8 +37,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
       buyer: { select: { name: true, email: true } },
       items: {
         include: {
-          seat: { select: { row: true, number: true } },
-          zone: { select: { name: true } },
+        ...orderItemInclude,
         },
       },
       _count: { select: { tickets: true } },

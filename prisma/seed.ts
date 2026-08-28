@@ -18,13 +18,87 @@ function daysFromNow(days: number) {
 }
 
 function numberedSeats(rows: number, seatsPerRow: number) {
-  const seats: { row: string; number: number }[] = [];
+  const seats: { row: string; number: number; posX: number; posY: number }[] = [];
   for (let rowIndex = 0; rowIndex < rows; rowIndex++) {
     for (let number = 1; number <= seatsPerRow; number++) {
-      seats.push({ row: String.fromCharCode(65 + rowIndex), number });
+      seats.push({
+        row: String.fromCharCode(65 + rowIndex),
+        number,
+        posX: 10 + (number - 1) * 28,
+        posY: 10 + rowIndex * 28,
+      });
     }
   }
   return seats;
+}
+
+/** Tables laid out in a grid inside their zone. */
+function gridTables(
+  count: number,
+  seats: number,
+  {
+    prefix = "M",
+    hasChairs = true,
+    shape = "ROUND" as "ROUND" | "SQUARE" | "RECT",
+    width = 60,
+    height = 60,
+    perRow = 3,
+    pitchX = 80,
+    pitchY = 80,
+  } = {},
+) {
+  return Array.from({ length: count }, (_, index) => ({
+    label: `${prefix}${index + 1}`,
+    seats,
+    hasChairs,
+    shape,
+    width,
+    height,
+    posX: 20 + (index % perRow) * pitchX,
+    posY: 20 + Math.floor(index / perRow) * pitchY,
+  }));
+}
+
+/**
+ * Puts each zone on sale for one event. Tables get an EventTable row eagerly
+ * (there are only a handful); numbered seats stay lazy — no row means
+ * "available at the zone price".
+ */
+async function seedEventZones(
+  eventId: string,
+  zonePrices: Record<string, number>,
+) {
+  for (const [zoneId, price] of Object.entries(zonePrices)) {
+    const zone = await prisma.zone.findUnique({
+      where: { id: zoneId },
+      select: { id: true, type: true, capacity: true, tables: { select: { id: true } } },
+    });
+    if (!zone) continue;
+
+    const eventZone = await prisma.eventZone.upsert({
+      where: { eventId_zoneId: { eventId, zoneId } },
+      update: { price },
+      create: {
+        eventId,
+        zoneId,
+        price,
+        capacityForSale: zone.type === "GENERAL" ? zone.capacity : null,
+        isEnabled: true,
+        defaultInclusionType: zone.type === "TABLES" ? "CONSUMPTION_CREDIT" : "NONE",
+        defaultInclusionValue: zone.type === "TABLES" ? price / 2 : null,
+      },
+    });
+
+    if (zone.tables.length > 0) {
+      await prisma.eventTable.createMany({
+        data: zone.tables.map((table) => ({
+          eventZoneId: eventZone.id,
+          tableId: table.id,
+        })),
+        skipDuplicates: true,
+      });
+    }
+  }
 }
 
 async function seedUsers() {
@@ -91,31 +165,45 @@ async function seedVenueAndEvents() {
       name: "Teatro Municipal Alberto Saavedra Pérez",
       address: "Calle Genaro Sanjinés 629",
       city: "La Paz",
-      capacity: 160,
-      seatMapType: "BOTH",
-      organizerId: organizer.id,
-      zones: {
+      ownerId: organizer.id,
+      floors: {
         create: [
           {
-            id: "seed-zone-vip",
-            name: "VIP",
-            capacity: 40,
-            priceMultiplier: 1.5,
-            rows: 5,
-            seatsPerRow: 8,
-            seats: { createMany: { data: numberedSeats(5, 8) } },
-          },
-          {
-            id: "seed-zone-general",
-            name: "General",
-            capacity: 120,
-            priceMultiplier: 1,
+            id: "seed-floor-teatro",
+            name: "Planta baja",
+            order: 0,
+            zones: {
+              create: [
+                {
+                  id: "seed-zone-vip",
+                  name: "VIP",
+                  type: "SEATED",
+                  color: "#8b5cf6",
+                  order: 0,
+                  posX: 0,
+                  posY: 0,
+                  width: 244,
+                  height: 160,
+                  seats: { createMany: { data: numberedSeats(5, 8) } },
+                },
+                {
+                  id: "seed-zone-general",
+                  name: "General",
+                  type: "GENERAL",
+                  color: "#6366f1",
+                  order: 1,
+                  capacity: 120,
+                  posX: 264,
+                  posY: 0,
+                },
+              ],
+            },
           },
         ],
       },
     },
   });
-  console.log("Seeded venue Teatro Municipal (VIP 5x8 numbered + General 120)");
+  console.log("Seeded venue Teatro Municipal (VIP 5x8 asientos + General 120)");
 
   const events = [
     {
@@ -126,7 +214,7 @@ async function seedVenueAndEvents() {
       category: "Comedia",
       date: daysFromNow(14),
       time: "20:30",
-      price: 60,
+      zonePrices: { "seed-zone-vip": 90, "seed-zone-general": 60 },
       status: "APPROVED" as const,
     },
     {
@@ -137,7 +225,7 @@ async function seedVenueAndEvents() {
       category: "Comedia",
       date: daysFromNow(30),
       time: "19:00",
-      price: 80,
+      zonePrices: { "seed-zone-vip": 120, "seed-zone-general": 80 },
       status: "APPROVED" as const,
     },
     {
@@ -148,12 +236,12 @@ async function seedVenueAndEvents() {
       category: "Comedia",
       date: daysFromNow(45),
       time: "21:00",
-      price: 35,
+      zonePrices: { "seed-zone-vip": 52.5, "seed-zone-general": 35 },
       status: "PENDING" as const,
     },
   ];
 
-  for (const event of events) {
+  for (const { zonePrices, ...event } of events) {
     await prisma.event.upsert({
       where: { id: event.id },
       update: { status: event.status },
@@ -164,6 +252,8 @@ async function seedVenueAndEvents() {
         paymentQrImage,
       },
     });
+    // Prices live on EventZone now: one row per zone this event sells
+    await seedEventZones(event.id, zonePrices);
     console.log(`Seeded event "${event.title}" (${event.status})`);
   }
 }
@@ -181,28 +271,82 @@ async function seedSecondOrganizer(paymentQrImage: string) {
       name: "Casa Teatro Santa Cruz",
       address: "Av. Monseñor Rivero 415",
       city: "Santa Cruz",
-      capacity: 200,
-      seatMapType: "ZONE",
-      organizerId: organizer.id,
-      zones: {
+      ownerId: organizer.id,
+      floors: {
         create: [
           {
-            id: "seed-zone-preferencial",
-            name: "Preferencial",
-            capacity: 60,
-            priceMultiplier: 1.3,
+            id: "seed-floor-casateatro-baja",
+            name: "Planta baja",
+            order: 0,
+            zones: {
+              create: [
+                {
+                  id: "seed-zone-preferencial",
+                  name: "Preferencial",
+                  type: "GENERAL",
+                  color: "#6366f1",
+                  order: 0,
+                  capacity: 60,
+                  posX: 0,
+                  posY: 0,
+                },
+                {
+                  id: "seed-zone-popular",
+                  name: "Popular",
+                  type: "GENERAL",
+                  color: "#22c55e",
+                  order: 1,
+                  capacity: 140,
+                  posX: 220,
+                  posY: 0,
+                },
+              ],
+            },
           },
           {
-            id: "seed-zone-popular",
-            name: "Popular",
-            capacity: 140,
-            priceMultiplier: 1,
+            // A second floor so the multi-floor UI has something to show
+            id: "seed-floor-casateatro-alta",
+            name: "Planta alta",
+            order: 1,
+            zones: {
+              create: [
+                {
+                  id: "seed-zone-lounges",
+                  name: "Lounges VIP",
+                  type: "TABLES",
+                  color: "#f59e0b",
+                  order: 0,
+                  posX: 0,
+                  posY: 0,
+                  width: 420,
+                  height: 340,
+                  // Sofas with a headcount, not seven chairs each: this is
+                  // what `hasChairs: false` is for.
+                  tables: {
+                    createMany: {
+                      data: gridTables(4, 7, {
+                        prefix: "Lounge ",
+                        hasChairs: false,
+                        shape: "RECT",
+                        width: 150,
+                        height: 80,
+                        perRow: 2,
+                        pitchX: 190,
+                        pitchY: 150,
+                      }),
+                    },
+                  },
+                },
+              ],
+            },
           },
         ],
       },
     },
   });
-  console.log("Seeded venue Casa Teatro Santa Cruz (Preferencial 60 + Popular 140)");
+  console.log(
+    "Seeded venue Casa Teatro Santa Cruz (2 pisos: General + 4 mesas VIP)",
+  );
 
   const events = [
     {
@@ -213,7 +357,11 @@ async function seedSecondOrganizer(paymentQrImage: string) {
       category: "Música",
       date: daysFromNow(21),
       time: "20:00",
-      price: 70,
+      zonePrices: {
+        "seed-zone-preferencial": 91,
+        "seed-zone-popular": 70,
+        "seed-zone-lounges": 1120,
+      },
       status: "APPROVED" as const,
     },
     {
@@ -224,12 +372,16 @@ async function seedSecondOrganizer(paymentQrImage: string) {
       category: "Teatro",
       date: daysFromNow(35),
       time: "19:30",
-      price: 55,
+      zonePrices: {
+        "seed-zone-preferencial": 71.5,
+        "seed-zone-popular": 55,
+        "seed-zone-lounges": 880,
+      },
       status: "APPROVED" as const,
     },
   ];
 
-  for (const event of events) {
+  for (const { zonePrices, ...event } of events) {
     await prisma.event.upsert({
       where: { id: event.id },
       update: { status: event.status },
@@ -240,6 +392,8 @@ async function seedSecondOrganizer(paymentQrImage: string) {
         paymentQrImage,
       },
     });
+    // Prices live on EventZone now: one row per zone this event sells
+    await seedEventZones(event.id, zonePrices);
     console.log(`Seeded event "${event.title}" (${event.status})`);
   }
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { releaseOrderHolds } from "@/lib/seats";
 import { requireRole } from "@/lib/api-auth";
 import { orderRejectedEmail, sendEmail } from "@/lib/email";
 import type { OrderStatus } from "@/generated/prisma/enums";
@@ -58,9 +59,7 @@ export async function POST(request: Request, { params }: RouteContext) {
 
   // Claim the status atomically, exactly like confirm does: without this,
   // a buyer cancelling at the same instant the organizer confirms would
-  // leave a CANCELLED order with valid tickets already issued. Cancelling
-  // is all it takes to release the inventory — seat and zone availability
-  // are derived from live orders (src/lib/seats.ts).
+  // leave a CANCELLED order with valid tickets already issued.
   const cancelled = await prisma.order.updateMany({
     where: { id: order.id, status: { in: cancellable } },
     data: { status: "CANCELLED", rejectionReason: reason },
@@ -71,6 +70,10 @@ export async function POST(request: Request, { params }: RouteContext) {
       { status: 409 },
     );
   }
+
+  // Availability is stored per event now, so the tables/seats this order held
+  // have to be handed back explicitly (free-capacity zones free themselves).
+  await releaseOrderHolds([order.id]);
 
   // Notify the buyer only when the organizer rejected a submitted proof
   let emailSent: boolean | null = null;

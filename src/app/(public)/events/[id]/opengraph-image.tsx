@@ -29,21 +29,20 @@ export default async function OpengraphImage({
       category: true,
       date: true,
       time: true,
-      price: true,
-      venue: {
-        select: {
-          name: true,
-          city: true,
-          zones: { select: { priceMultiplier: true } },
-        },
+      venue: { select: { name: true, city: true } },
+      eventZones: {
+        where: { isEnabled: true },
+        select: { price: true },
+        orderBy: { price: "asc" },
+        take: 1,
       },
     },
   });
 
   const title = event?.title ?? "Üticket";
-  const multipliers = event?.venue.zones.map((zone) => Number(zone.priceMultiplier)) ?? [];
-  const priceFrom = event
-    ? Number(event.price) * (multipliers.length ? Math.min(...multipliers) : 1)
+  // Cheapest zone actually on sale — prices live per zone now
+  const priceFrom = event?.eventZones[0]
+    ? Number(event.eventZones[0].price)
     : null;
 
   return new ImageResponse(

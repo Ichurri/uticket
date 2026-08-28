@@ -44,14 +44,14 @@ function actAs(user: { id: string; role: string }) {
 /** Buys 2 zone tickets and confirms the order; returns organizer, event, tickets. */
 async function confirmedTickets() {
   const buyer = await createBuyer();
-  const { organizer, event, zone } = await createApprovedEvent();
+  const { organizer, event, eventZone } = await createApprovedEvent();
 
   actAs({ id: buyer.id, role: "BUYER" });
   const created = await createOrder(
     jsonRequest("http://test.local/api/orders", {
       eventId: event.id,
       seatIds: [],
-      zones: [{ zoneId: zone.id, quantity: 2 }],
+      zones: [{ eventZoneId: eventZone.id, quantity: 2 }],
     }),
   );
   expect(created.status).toBe(201);
@@ -242,7 +242,7 @@ describe("cancelling an event cascades", () => {
       jsonRequest("http://test.local/api/orders", {
         eventId: event.id,
         seatIds: [],
-        zones: [{ zoneId: (await prisma.zone.findFirstOrThrow()).id, quantity: 1 }],
+        zones: [{ eventZoneId: (await prisma.eventZone.findFirstOrThrow()).id, quantity: 1 }],
       }),
     );
     expect(pending.status).toBe(201);

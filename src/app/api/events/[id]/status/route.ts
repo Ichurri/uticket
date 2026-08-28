@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { releaseOrderHolds } from "@/lib/seats";
 import { requireRole } from "@/lib/api-auth";
 import { eventStatusActionSchema } from "@/lib/validations/event";
 import {
@@ -95,8 +96,8 @@ export async function POST(request: Request, { params }: RouteContext) {
       where: { id, status: { in: ["PENDING", "APPROVED"] } },
       data: { status: "CANCELLED" },
     }),
-    // Unpaid and in-review orders die with the event, releasing their
-    // inventory (availability is derived from live orders).
+    // Unpaid and in-review orders die with the event; the tables/seats they
+    // held are handed back right after the transaction.
     prisma.order.updateMany({
       where: {
         eventId: id,
@@ -122,6 +123,9 @@ export async function POST(request: Request, { params }: RouteContext) {
       { status: 409 },
     );
   }
+
+  // Put every spot those cancelled orders were holding back on sale
+  await releaseOrderHolds(affected.map((order) => order.id));
 
   const origin = new URL(request.url).origin;
   const organizer = await prisma.user.findUnique({

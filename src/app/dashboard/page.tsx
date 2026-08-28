@@ -2,6 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import {
+  eventZoneCapacity,
+  eventZoneCapacitySelect,
+} from "@/lib/event-zones";
+import { orderItemInclude } from "@/lib/order-includes";
 import { expireStaleOrders } from "@/lib/orders";
 import { cn, formatCurrency, formatWeekdayDate, BOLIVIA_TZ } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/Button";
@@ -91,13 +96,11 @@ export default async function DashboardPage() {
         id: true,
         title: true,
         date: true,
-        venue: {
-          select: {
-            zones: {
-              select: { id: true, name: true, capacity: true },
-              orderBy: { priceMultiplier: "desc" },
-            },
-          },
+        // Occupancy is per event now: what this event put on sale, not
+        // what the room physically holds.
+        eventZones: {
+          where: { isEnabled: true },
+          select: eventZoneCapacitySelect,
         },
       },
       orderBy: { date: "asc" },
@@ -112,8 +115,7 @@ export default async function DashboardPage() {
         event: { select: { title: true } },
         items: {
           include: {
-            seat: { select: { row: true, number: true } },
-            zone: { select: { name: true } },
+        ...orderItemInclude,
           },
         },
       },
@@ -155,21 +157,26 @@ export default async function DashboardPage() {
   const soldByEventZone = new Map<string, number>();
   if (approvedEvents.length > 0) {
     const grouped = await prisma.ticket.groupBy({
-      by: ["eventId", "zoneId"],
+      by: ["eventZoneId"],
       where: {
         eventId: { in: approvedEvents.map((event) => event.id) },
         status: { not: "CANCELLED" },
       },
-      _count: { _all: true },
+      _count: true,
     });
     for (const row of grouped) {
-      soldByEventZone.set(`${row.eventId}:${row.zoneId}`, row._count._all);
+      if (!row.eventZoneId) continue;
+      soldByEventZone.set(row.eventZoneId, row._count);
     }
   }
 
   const totalCapacity = approvedEvents.reduce(
     (sum, event) =>
-      sum + event.venue.zones.reduce((s, zone) => s + zone.capacity, 0),
+      sum +
+      event.eventZones.reduce(
+        (zoneSum, eventZone) => zoneSum + eventZoneCapacity(eventZone),
+        0,
+      ),
     0,
   );
 
@@ -321,14 +328,13 @@ export default async function DashboardPage() {
                 </p>
               ) : (
                 approvedEvents.slice(0, 5).map((event) => {
-                  const capacity = event.venue.zones.reduce(
-                    (sum, zone) => sum + zone.capacity,
+                  const capacity = event.eventZones.reduce(
+                    (sum, eventZone) => sum + eventZoneCapacity(eventZone),
                     0,
                   );
-                  const sold = event.venue.zones.reduce(
-                    (sum, zone) =>
-                      sum +
-                      (soldByEventZone.get(`${event.id}:${zone.id}`) ?? 0),
+                  const sold = event.eventZones.reduce(
+                    (sum, eventZone) =>
+                      sum + (soldByEventZone.get(eventZone.id) ?? 0),
                     0,
                   );
                   const percent =

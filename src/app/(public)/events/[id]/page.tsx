@@ -3,7 +3,8 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { expireStaleOrders } from "@/lib/orders";
-import { getEventInventory } from "@/lib/seats";
+import { releaseExpiredHolds } from "@/lib/seats";
+import { getEventSeatMap } from "@/lib/event-seat-map";
 import { getPlatformSettings } from "@/lib/settings";
 import { eventStartsAt, formatDate, salesAreClosed } from "@/lib/utils";
 import { TicketIcon, CalendarIcon, MapPinIcon, PhoneIcon } from "@/components/ui/icons";
@@ -18,7 +19,7 @@ import { SeatMap } from "@/components/seats/SeatMap";
 import { ShareEventButton } from "@/components/events/ShareEventButton";
 import { absoluteUrl } from "@/lib/site";
 import { SelectionSummary } from "@/components/seats/SelectionSummary";
-import type { EventSeatMapDto, ZoneDto } from "@/types/seat-map";
+import type { ZoneDto } from "@/types/seat-map";
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -27,19 +28,7 @@ async function getApprovedEvent(id: string) {
     where: { id, status: "APPROVED" },
     include: {
       organizer: { select: { name: true, phone: true } },
-      venue: {
-        include: {
-          zones: {
-            include: {
-              seats: {
-                select: { id: true, row: true, number: true },
-                orderBy: [{ row: "asc" }, { number: "asc" }],
-              },
-            },
-            orderBy: { priceMultiplier: "desc" },
-          },
-        },
-      },
+      venue: true,
     },
   });
 }
@@ -84,50 +73,25 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function EventDetailPage({ params }: PageProps) {
   const { id } = await params;
   await expireStaleOrders();
+  await releaseExpiredHolds();
   const event = await getApprovedEvent(id);
   if (!event) notFound();
 
   const { orderCutoffHours } = await getPlatformSettings();
   const salesClosed = salesAreClosed(event, orderCutoffHours);
 
-  const basePrice = Number(event.price);
-  // What THIS event's live orders hold — the venue's seats are shared with
-  // every other event held there, so occupancy is never read off the seat.
-  const { seatHolds, freeZoneTaken } = await getEventInventory(event.id);
+  // Everything the buyer can pick comes from the commercial layer: only the
+  // zones this event actually put on sale, at this event's prices.
+  const seatMap = await getEventSeatMap(event.id, event.title);
+  const zones: ZoneDto[] = seatMap.floors.flatMap((floor) => floor.zones);
 
-  const zones: ZoneDto[] = event.venue.zones.map((zone) => {
-    const numbered = zone.rows !== null;
-    const seats = numbered
-      ? zone.seats.map((seat) => ({
-          ...seat,
-          status: seatHolds.get(seat.id) ?? ("AVAILABLE" as const),
-        }))
-      : [];
-    const available = numbered
-      ? seats.filter((seat) => seat.status === "AVAILABLE").length
-      : Math.max(0, zone.capacity - (freeZoneTaken.get(zone.id) ?? 0));
-    return {
-      id: zone.id,
-      name: zone.name,
-      numbered,
-      price: basePrice * Number(zone.priceMultiplier),
-      capacity: zone.capacity,
-      available,
-      seats,
-    };
-  });
-
-  const seatMap: EventSeatMapDto = {
-    eventId: event.id,
-    eventTitle: event.title,
-    zones,
-  };
-
-  const cheapestZone = zones.reduce<ZoneDto | null>(
-    (cheapest, zone) =>
-      !cheapest || zone.price < cheapest.price ? zone : cheapest,
-    null,
-  );
+  const cheapestZone = zones
+    .filter((zone) => zone.price > 0)
+    .reduce<ZoneDto | null>(
+      (cheapest, zone) =>
+        !cheapest || zone.price < cheapest.price ? zone : cheapest,
+      null,
+    );
   const eventJsonLd = {
     "@context": "https://schema.org",
     "@type": "Event",

@@ -20,10 +20,49 @@ enum EventStatus {
   CANCELLED
 }
 
-enum SeatMapType {
-  ZONE
-  NUMBERED
-  BOTH
+/// What a zone sells. Kept explicit instead of sniffing `rows != null`:
+/// a lounge zone also has no rows, and the order route used that null to
+/// mean "free capacity" — which would have let a buyer purchase raw
+/// capacity in a lounge zone and bypass the lounge units entirely.
+/// What a zone sells. Physical only — says nothing about price or stock.
+enum ZoneType {
+  /// Headcount, no assigned spot (pista, general)
+  GENERAL
+  /// Tables/boxes, sold whole or by the seat
+  TABLES
+  /// Numbered seats (theatre)
+  SEATED
+}
+
+enum TableShape {
+  ROUND
+  SQUARE
+  RECT
+}
+
+/// How a TABLES zone sells its tables, for one event.
+enum TableSaleMode {
+  WHOLE_TABLE
+  PER_SEAT
+}
+
+/// What the price buys beyond the spot itself.
+enum InclusionType {
+  NONE
+  ENTRY_ONLY
+  CONSUMPTION_CREDIT
+  BOTTLE
+  CUSTOM
+}
+
+/// Commercial-layer status. Lives ONLY on EventTable/EventSeat, never on the
+/// physical Table/Seat: the same venue runs many events, so a spot sold on
+/// Friday must stay free for Saturday.
+enum SaleStatus {
+  AVAILABLE
+  HELD
+  SOLD
+  BLOCKED
 }
 
 enum OrderStatus {
@@ -103,48 +142,116 @@ model PlatformSettings {
   updatedAt        DateTime @updatedAt
 }
 
+/// PHYSICAL LAYER. Where the place is and how it is laid out. Knows nothing
+/// about prices or availability — those live in the commercial layer
+/// (EventZone / EventTable / EventSeat), which changes every event.
 model Venue {
-  id          String      @id @default(cuid())
-  name        String
-  address     String
-  city        String
-  capacity    Int
-  seatMapType SeatMapType
-  organizerId String
-  createdAt   DateTime    @default(now())
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+  address       String
+  city          String
+  googleMapsUrl String?
+  latitude      Float?
+  longitude     Float?
+  coverImage    String?
+  ownerId       String
+  /// Whether other organizers may hold events here
+  isPublic      Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
 
-  organizer User    @relation(fields: [organizerId], references: [id], onDelete: Cascade)
-  zones     Zone[]
-  events    Event[]
+  owner  User    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  floors Floor[]
+  events Event[]
+}
+
+/// A level of the venue. Always at least one ("Planta baja") — the UI hides
+/// the concept when there is only one, but the model always has it.
+model Floor {
+  id              String  @id @default(cuid())
+  venueId         String
+  name            String
+  order           Int     @default(0)
+  /// Editor canvas units; zone/table geometry is expressed in these
+  canvasWidth     Int     @default(1000)
+  canvasHeight    Int     @default(700)
+  backgroundImage String?
+  isActive        Boolean @default(true)
+
+  venue Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  zones Zone[]
+
+  @@unique([venueId, name])
 }
 
 model Zone {
-  id              String  @id @default(cuid())
-  name            String
-  capacity        Int
-  priceMultiplier Decimal @default(1) @db.Decimal(5, 2)
-  rows            Int?
-  seatsPerRow     Int?
-  venueId         String
+  id          String   @id @default(cuid())
+  floorId     String
+  name        String
+  type        ZoneType @default(GENERAL)
+  description String?
+  color       String   @default("#6366f1")
+  order       Int      @default(0)
+  /// Headcount — ONLY meaningful when type = GENERAL
+  capacity    Int?
+  isActive    Boolean  @default(true)
 
-  venue      Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  /// Geometry inside the floor canvas
+  posX     Int @default(0)
+  posY     Int @default(0)
+  width    Int @default(200)
+  height   Int @default(150)
+  rotation Int @default(0)
+
+  floor      Floor       @relation(fields: [floorId], references: [id], onDelete: Cascade)
+  tables     Table[]
   seats      Seat[]
-  orderItems OrderItem[]
-  tickets    Ticket[]
+  eventZones EventZone[]
+}
+
+/// A table/box in a TABLES zone. Physical: it has a capacity and a position,
+/// never a price or a status.
+model Table {
+  id        String     @id @default(cuid())
+  zoneId    String
+  label     String
+  /// How many people it admits. The name is historical: this is the capacity
+  /// whether or not the table actually has chairs around it.
+  seats     Int
+  /// A discotheque lounge is a sofa with a headcount, not eight chairs. False
+  /// means "draw it bare and read it as capacity"; it changes nothing about
+  /// how the spots are sold.
+  hasChairs Boolean    @default(true)
+  shape     TableShape @default(ROUND)
+  posX      Int
+  posY      Int
+  width     Int        @default(60)
+  height    Int        @default(60)
+  rotation  Int        @default(0)
+
+  zone        Zone         @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  eventTables EventTable[]
+
+  @@unique([zoneId, label])
 }
 
 /// Physical seat of a venue. It has NO status of its own: the same venue
 /// hosts many events, so occupancy is per EVENT and is derived from the
 /// order items of that event's live orders (see src/lib/seats.ts).
+/// Physical seat of a SEATED zone. Carries NO status: occupancy is per event
+/// and lives on EventSeat.
 model Seat {
   id     String @id @default(cuid())
+  zoneId String
   row    String
   number Int
-  zoneId String
+  posX   Int    @default(0)
+  posY   Int    @default(0)
 
   zone       Zone        @relation(fields: [zoneId], references: [id], onDelete: Cascade)
-  orderItems OrderItem[]
-  tickets    Ticket[]
+  eventSeats EventSeat[]
 
   @@unique([zoneId, row, number])
 }
@@ -161,19 +268,103 @@ model Event {
   /// Bearer code for the public door-scanner page (/scan/[code]); rotatable
   scanCode       String?     @unique
   status         EventStatus @default(DRAFT)
-  price          Decimal     @db.Decimal(10, 2)
   venueId        String
   organizerId    String
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
-  venue     Venue    @relation(fields: [venueId], references: [id])
-  organizer User     @relation(fields: [organizerId], references: [id], onDelete: Cascade)
-  orders    Order[]
-  tickets   Ticket[]
+  venue      Venue       @relation(fields: [venueId], references: [id])
+  organizer  User        @relation(fields: [organizerId], references: [id], onDelete: Cascade)
+  eventZones EventZone[]
+  orders     Order[]
+  tickets    Ticket[]
 
   @@index([status, date])
   @@index([organizerId])
+}
+
+// ─────────────────────────── COMMERCIAL LAYER ───────────────────────────
+// What one event sells, at what price, and what is already taken. Rebuilt
+// per event; never touches the physical layer above.
+
+/// One zone put on sale for one event.
+model EventZone {
+  id              String    @id @default(cuid())
+  eventId         String
+  zoneId          String
+  price           Decimal   @db.Decimal(10, 2)
+  /// May be lower than zone.capacity to hold stock back. GENERAL only.
+  capacityForSale Int?
+  isEnabled       Boolean   @default(true)
+  salesStartAt    DateTime?
+  salesEndAt      DateTime?
+
+  /// Table configuration — applies when zone.type = TABLES
+  tableSaleMode         TableSaleMode @default(WHOLE_TABLE)
+  /// Required when tableSaleMode = PER_SEAT
+  seatPrice             Decimal?      @db.Decimal(10, 2)
+  defaultInclusionType  InclusionType @default(NONE)
+  defaultInclusionValue Decimal?      @db.Decimal(10, 2)
+  defaultInclusionNote  String?
+
+  event       Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  zone        Zone         @relation(fields: [zoneId], references: [id])
+  eventTables EventTable[]
+  eventSeats  EventSeat[]
+  orderItems  OrderItem[]
+  tickets     Ticket[]
+
+  @@unique([eventId, zoneId])
+  @@index([eventId])
+}
+
+/// One table on sale for one event. Created eagerly with its EventZone —
+/// tables come in dozens, not thousands.
+model EventTable {
+  id          String @id @default(cuid())
+  eventZoneId String
+  tableId     String
+
+  /// Optional overrides on top of the zone defaults
+  price          Decimal?       @db.Decimal(10, 2)
+  seatPrice      Decimal?       @db.Decimal(10, 2)
+  inclusionType  InclusionType?
+  inclusionValue Decimal?       @db.Decimal(10, 2)
+  inclusionNote  String?
+
+  status    SaleStatus @default(AVAILABLE)
+  /// PER_SEAT only: spots taken, checked against table.seats
+  seatsSold Int        @default(0)
+  /// Checkout hold; swept lazily and by the cron
+  heldUntil DateTime?
+
+  eventZone  EventZone   @relation(fields: [eventZoneId], references: [id], onDelete: Cascade)
+  table      Table       @relation(fields: [tableId], references: [id])
+  orderItems OrderItem[]
+  tickets    Ticket[]
+
+  @@unique([eventZoneId, tableId])
+  @@index([status])
+}
+
+/// One numbered seat on sale for one event. Created LAZILY — a theatre has
+/// thousands of seats and most events never touch most of them; no row means
+/// "available at the EventZone price".
+model EventSeat {
+  id          String     @id @default(cuid())
+  eventZoneId String
+  seatId      String
+  price       Decimal?   @db.Decimal(10, 2)
+  status      SaleStatus @default(AVAILABLE)
+  heldUntil   DateTime?
+
+  eventZone  EventZone   @relation(fields: [eventZoneId], references: [id], onDelete: Cascade)
+  seat       Seat        @relation(fields: [seatId], references: [id])
+  orderItems OrderItem[]
+  tickets    Ticket[]
+
+  @@unique([eventZoneId, seatId])
+  @@index([status])
 }
 
 model Order {
@@ -199,19 +390,27 @@ model Order {
 }
 
 model OrderItem {
-  id        String  @id @default(cuid())
-  quantity  Int     @default(1)
-  unitPrice Decimal @db.Decimal(10, 2)
-  orderId   String
-  seatId    String?
-  zoneId    String?
+  id            String  @id @default(cuid())
+  /// Tickets for a GENERAL zone; always 1 for a seat and for a whole table
+  /// (a table line is one unit — its ticket count is table.seats)
+  quantity      Int     @default(1)
+  /// Price of the whole line unit: one seat, one table, or one general ticket
+  unitPrice     Decimal @db.Decimal(10, 2)
+  orderId       String
+  /// Spots taken inside a table when the zone sells PER_SEAT
+  seatsQuantity Int?
+  eventZoneId   String?
+  eventTableId  String?
+  eventSeatId   String?
 
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  seat  Seat? @relation(fields: [seatId], references: [id])
-  zone  Zone? @relation(fields: [zoneId], references: [id])
+  order      Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  eventZone  EventZone?  @relation(fields: [eventZoneId], references: [id])
+  eventTable EventTable? @relation(fields: [eventTableId], references: [id])
+  eventSeat  EventSeat?  @relation(fields: [eventSeatId], references: [id])
 
-  @@index([seatId])
-  @@index([zoneId])
+  @@index([eventZoneId])
+  @@index([eventTableId])
+  @@index([eventSeatId])
 }
 
 model Ticket {
@@ -222,14 +421,28 @@ model Ticket {
   usedAt    DateTime?
   orderId   String
   eventId   String
-  seatId    String?
-  zoneId    String?
   createdAt DateTime     @default(now())
 
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  seat  Seat? @relation(fields: [seatId], references: [id])
-  zone  Zone? @relation(fields: [zoneId], references: [id])
+  eventZoneId  String?
+  eventTableId String?
+  eventSeatId  String?
+
+  /// Snapshot taken at purchase. The layout is editable between events, so a
+  /// renamed or deleted zone must never break a ticket already sold.
+  venueName        String?
+  floorName        String?
+  zoneName         String?
+  tableLabel       String?
+  seatLabel        String?
+  priceAtPurchase  Decimal? @db.Decimal(10, 2)
+  inclusionSummary String?
+
+  order      Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  event      Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventZone  EventZone?  @relation(fields: [eventZoneId], references: [id])
+  eventTable EventTable? @relation(fields: [eventTableId], references: [id])
+  eventSeat  EventSeat?  @relation(fields: [eventSeatId], references: [id])
 
   @@index([eventId, status])
+  @@index([eventTableId])
 }

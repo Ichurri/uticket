@@ -2,11 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api-auth";
 import { venueSchema } from "@/lib/validations/venue";
-import {
-  seatMapTypeFor,
-  venueCapacity,
-  zoneCreateData,
-} from "@/lib/venue-zones";
+import { zoneCreateData } from "@/lib/venue-zones";
+import { resolveVenueLocation } from "@/lib/venue-location";
 
 export async function POST(request: Request) {
   const { session, error } = await requireRole("ORGANIZER", "ADMIN");
@@ -21,19 +18,32 @@ export async function POST(request: Request) {
     );
   }
 
-  const { name, address, city, zones } = parsed.data;
+  const { floors, googleMapsUrl, latitude, longitude, ...data } = parsed.data;
+  // The link is kept verbatim for the "Cómo llegar" button; the coordinates
+  // are best-effort and never block the save.
+  const location = await resolveVenueLocation({
+    googleMapsUrl,
+    latitude,
+    longitude,
+  });
 
   const venue = await prisma.venue.create({
     data: {
-      name,
-      address,
-      city,
-      capacity: venueCapacity(zones),
-      seatMapType: seatMapTypeFor(zones),
-      organizerId: session.user.id,
-      zones: { create: zoneCreateData(zones) },
+      ...data,
+      ...location,
+      ownerId: session.user.id,
+      floors: {
+        create: floors.map((floor, index) => ({
+          name: floor.name,
+          order: floor.order ?? index,
+          canvasWidth: floor.canvasWidth,
+          canvasHeight: floor.canvasHeight,
+          backgroundImage: floor.backgroundImage ?? null,
+          zones: { create: floor.zones.map(zoneCreateData) },
+        })),
+      },
     },
-    include: { zones: true },
+    include: { floors: { include: { zones: true } } },
   });
 
   return NextResponse.json({ venue }, { status: 201 });

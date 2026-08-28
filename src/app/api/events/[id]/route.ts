@@ -1,21 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, type AuthedSession } from "@/lib/api-auth";
+import { requireRole } from "@/lib/api-auth";
 import { eventSchema } from "@/lib/validations/event";
 import { eventDate } from "@/lib/utils";
+import { syncEventZones } from "@/lib/event-zones";
+import { findOwnEvent } from "@/lib/events";
 
 type RouteContext = { params: Promise<{ id: string }> };
-
-async function findOwnEvent(id: string, session: AuthedSession) {
-  const event = await prisma.event.findUnique({ where: { id } });
-  if (!event) {
-    return { response: NextResponse.json({ error: "Evento no encontrado" }, { status: 404 }) };
-  }
-  if (event.organizerId !== session.user.id && session.user.role !== "ADMIN") {
-    return { response: NextResponse.json({ error: "No tenés permisos sobre este evento" }, { status: 403 }) };
-  }
-  return { event };
-}
 
 export async function PATCH(request: Request, { params }: RouteContext) {
   const { session, error } = await requireRole("ORGANIZER", "ADMIN");
@@ -41,19 +32,30 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     );
   }
 
-  const { venueId, date, ...data } = parsed.data;
+  const { venueId, date, basePrice, ...data } = parsed.data;
 
   const venue = await prisma.venue.findUnique({ where: { id: venueId } });
-  if (!venue || (venue.organizerId !== session.user.id && session.user.role !== "ADMIN")) {
+  if (
+    !venue ||
+    (venue.ownerId !== session.user.id &&
+      !venue.isPublic &&
+      session.user.role !== "ADMIN")
+  ) {
     return NextResponse.json(
       { error: "El venue elegido no existe o no te pertenece" },
       { status: 400 },
     );
   }
 
-  const event = await prisma.event.update({
-    where: { id },
-    data: { ...data, date: eventDate(date), venueId },
+  const event = await prisma.$transaction(async (tx) => {
+    const updated = await tx.event.update({
+      where: { id },
+      data: { ...data, date: eventDate(date), venueId },
+    });
+    // Moving to another venue puts that venue's zones on sale too; zones the
+    // organizer already priced are left alone.
+    await syncEventZones(tx, { eventId: id, venueId, basePrice });
+    return updated;
   });
 
   return NextResponse.json({ event });

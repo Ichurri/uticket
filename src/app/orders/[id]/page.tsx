@@ -4,9 +4,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { orderItemInclude } from "@/lib/order-includes";
 import { expireStaleOrders } from "@/lib/orders";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import { ORDER_STATUS_LABELS } from "@/lib/constants";
+import { orderItemLabel, ticketLabel } from "@/lib/order-items";
 import { buttonVariants } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import {
@@ -32,17 +34,6 @@ export const metadata: Metadata = {
 
 type PageProps = { params: Promise<{ id: string }> };
 
-function itemLabel(item: {
-  quantity: number;
-  seat: { row: string; number: number } | null;
-  zone: { name: string } | null;
-}) {
-  if (item.seat) {
-    return `${item.zone?.name ?? ""} · Asiento ${item.seat.row}${item.seat.number}`;
-  }
-  return `${item.zone?.name ?? "Zona"} × ${item.quantity}`;
-}
-
 export default async function OrderDetailPage({ params }: PageProps) {
   const { id } = await params;
   const session = await auth();
@@ -53,17 +44,12 @@ export default async function OrderDetailPage({ params }: PageProps) {
     include: {
       items: {
         include: {
-          seat: { select: { row: true, number: true } },
-          zone: { select: { name: true } },
+        ...orderItemInclude,
         },
       },
-      tickets: {
-        include: {
-          seat: { select: { row: true, number: true } },
-          zone: { select: { name: true } },
-        },
-        orderBy: { createdAt: "asc" },
-      },
+      // Tickets need no joins: their label comes from the snapshot frozen
+      // onto the row at purchase time.
+      tickets: { orderBy: { createdAt: "asc" } },
       event: {
         select: {
           id: true,
@@ -237,7 +223,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                     {order.items.map((item) => (
                       <li key={item.id} className="flex justify-between gap-2">
                         <span className="text-muted-foreground">
-                          {itemLabel(item)}
+                          {orderItemLabel(item)}
                         </span>
                         <span className="tabular-nums">
                           {formatCurrency(
@@ -327,7 +313,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                     {order.items.map((item) => (
                       <li key={item.id} className="flex justify-between gap-2">
                         <span className="text-muted-foreground">
-                          {itemLabel(item)}
+                          {orderItemLabel(item)}
                         </span>
                         <span className="tabular-nums">
                           {formatCurrency(
@@ -376,9 +362,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   code: ticket.code,
                   qrCode: ticket.qrCode,
                   status: ticket.status,
-                  label: ticket.seat
-                    ? `${ticket.zone?.name ?? ""} · Asiento ${ticket.seat.row}${ticket.seat.number}`
-                    : (ticket.zone?.name ?? "Entrada general"),
+                  label: ticketLabel(ticket),
                   eventTitle: order.event.title,
                   eventDate: order.event.date,
                   eventTime: order.event.time,

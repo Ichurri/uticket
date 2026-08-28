@@ -59,9 +59,19 @@ export function CartView({
       body: JSON.stringify({
         eventId,
         seatIds: items.filter((item) => item.seatId).map((item) => item.seatId),
+        tables: items
+          .filter((item) => item.eventTableId)
+          .map((item) => ({
+            eventTableId: item.eventTableId,
+            ...(item.seats ? { seats: item.seats } : {}),
+          })),
+        // Only GENERAL lines: seat and table items carry an eventZoneId too
         zones: items
-          .filter((item) => !item.seatId)
-          .map((item) => ({ zoneId: item.zoneId, quantity: item.quantity })),
+          .filter((item) => !item.seatId && !item.eventTableId)
+          .map((item) => ({
+            eventZoneId: item.eventZoneId,
+            quantity: item.quantity,
+          })),
       }),
     });
 
@@ -86,7 +96,7 @@ export function CartView({
       <EmptyState
         icon={<ShoppingCartIcon />}
         title="Tu carrito está vacío"
-        description="Explorá los eventos disponibles y elegí tus asientos o zonas."
+        description="Explorá los eventos disponibles y elegí tus asientos, mesas o zonas."
         action={
           <Link href="/events" className={buttonVariants({ size: "sm" })}>
             Explorar eventos
@@ -100,7 +110,10 @@ export function CartView({
   const total = cartTotal(shownItems);
   const count = cartCount(shownItems);
   const seatItems = shownItems.filter((item) => item.seatId);
-  const zoneItems = shownItems.filter((item) => !item.seatId);
+  const tableItems = shownItems.filter((item) => item.eventTableId);
+  const zoneItems = shownItems.filter(
+    (item) => !item.seatId && !item.eventTableId,
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -113,7 +126,7 @@ export function CartView({
           href={`/events/${eventId}`}
           className={buttonVariants({ variant: "outline", size: "sm" })}
         >
-          ← Volver a asientos
+          ← Volver al evento
         </Link>
       </div>
 
@@ -221,6 +234,31 @@ export function CartView({
                 </div>
               ))}
 
+              {tableItems.map((item) => (
+                <div
+                  key={item.key}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-border p-3 text-sm"
+                >
+                  <div>
+                    <p className="font-medium">{item.label}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {item.seats
+                        ? `${formatCurrency(item.unitPrice)} × ${item.seats} lugar${item.seats === 1 ? "" : "es"}`
+                        : `${formatCurrency(item.unitPrice)} · incluye ${item.admits} entrada${item.admits === 1 ? "" : "s"}`}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-danger"
+                    onClick={() => removeItem(item.key)}
+                  >
+                    Quitar
+                  </Button>
+                </div>
+              ))}
+
               {zoneItems.map((item) => (
                 <div
                   key={item.key}
@@ -243,7 +281,7 @@ export function CartView({
                         setZoneQuantity(
                           { eventId, eventTitle: eventTitle ?? "" },
                           {
-                            zoneId: item.zoneId,
+                            eventZoneId: item.eventZoneId,
                             label: item.label,
                             unitPrice: item.unitPrice,
                           },
@@ -267,7 +305,7 @@ export function CartView({
                         setZoneQuantity(
                           { eventId, eventTitle: eventTitle ?? "" },
                           {
-                            zoneId: item.zoneId,
+                            eventZoneId: item.eventZoneId,
                             label: item.label,
                             unitPrice: item.unitPrice,
                           },

@@ -44,14 +44,14 @@ beforeEach(async () => {
 describe("POST /api/orders/[id]/confirm", () => {
   it("issues tickets exactly once under concurrent confirms", async () => {
     const buyer = await createBuyer();
-    const { organizer, event, zone } = await createApprovedEvent();
+    const { organizer, event, eventZone } = await createApprovedEvent();
 
     actAs({ id: buyer.id, role: "BUYER" });
     const created = await createOrder(
       jsonRequest("http://test.local/api/orders", {
         eventId: event.id,
         seatIds: [],
-        zones: [{ zoneId: zone.id, quantity: 2 }],
+        zones: [{ eventZoneId: eventZone.id, quantity: 2 }],
       }),
     );
     expect(created.status).toBe(201);

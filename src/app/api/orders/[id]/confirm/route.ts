@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/api-auth";
 import { expireStaleOrders } from "@/lib/orders";
 import { orderConfirmedEmail, sendEmail } from "@/lib/email";
+import { inclusionSummary, ticketCountFor } from "@/lib/order-items";
+import { resolveInclusion } from "@/lib/event-zones";
 import type { TicketStatus } from "@/generated/prisma/enums";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -21,8 +23,42 @@ export async function POST(request: Request, { params }: RouteContext) {
   const order = await prisma.order.findUnique({
     where: { id },
     include: {
-      items: true,
-      event: { select: { id: true, title: true, organizerId: true } },
+      items: {
+        include: {
+          eventZone: {
+            select: {
+              id: true,
+              price: true,
+              defaultInclusionType: true,
+              defaultInclusionValue: true,
+              defaultInclusionNote: true,
+              zone: {
+                select: { name: true, floor: { select: { name: true } } },
+              },
+            },
+          },
+          eventTable: {
+            select: {
+              id: true,
+              inclusionType: true,
+              inclusionValue: true,
+              inclusionNote: true,
+              table: { select: { label: true, seats: true } },
+            },
+          },
+          eventSeat: {
+            select: { id: true, seat: { select: { row: true, number: true } } },
+          },
+        },
+      },
+      event: {
+        select: {
+          id: true,
+          title: true,
+          organizerId: true,
+          venue: { select: { name: true } },
+        },
+      },
       buyer: { select: { name: true, email: true } },
     },
   });
@@ -45,19 +81,34 @@ export async function POST(request: Request, { params }: RouteContext) {
     );
   }
 
-  // One ticket per seat item; N tickets for zone items with quantity N
+  // One ticket per seat, one per person for a whole table, `seatsQuantity`
+  // for spots inside a table, `quantity` for a GENERAL zone.
   const ticketsData: {
     code: string;
     qrCode: string;
     orderId: string;
     eventId: string;
-    seatId: string | null;
-    zoneId: string | null;
+    eventZoneId: string | null;
+    eventTableId: string | null;
+    eventSeatId: string | null;
+    venueName: string;
+    floorName: string | null;
+    zoneName: string | null;
+    tableLabel: string | null;
+    seatLabel: string | null;
+    priceAtPurchase: number;
+    inclusionSummary: string | null;
     status: TicketStatus;
   }[] = [];
 
   for (const item of order.items) {
-    const count = item.seatId ? 1 : item.quantity;
+    const count = ticketCountFor(item);
+    // Frozen at purchase: the layout is editable between events, so a renamed
+    // or deleted zone must never break a ticket that was already sold.
+    const inclusion = item.eventZone
+      ? resolveInclusion(item.eventTable, item.eventZone)
+      : null;
+
     for (let i = 0; i < count; i++) {
       const code = randomUUID();
       const qrCode = await QRCode.toDataURL(code, { width: 320, margin: 2 });
@@ -66,8 +117,18 @@ export async function POST(request: Request, { params }: RouteContext) {
         qrCode,
         orderId: order.id,
         eventId: order.event.id,
-        seatId: item.seatId,
-        zoneId: item.zoneId,
+        eventZoneId: item.eventZoneId,
+        eventTableId: item.eventTableId,
+        eventSeatId: item.eventSeatId,
+        venueName: order.event.venue.name,
+        floorName: item.eventZone?.zone.floor.name ?? null,
+        zoneName: item.eventZone?.zone.name ?? null,
+        tableLabel: item.eventTable?.table.label ?? null,
+        seatLabel: item.eventSeat
+          ? `${item.eventSeat.seat.row}${item.eventSeat.seat.number}`
+          : null,
+        priceAtPurchase: Number(item.unitPrice),
+        inclusionSummary: inclusion ? inclusionSummary(inclusion) : null,
         status: "VALID",
       });
     }
@@ -87,8 +148,28 @@ export async function POST(request: Request, { params }: RouteContext) {
       if (claimed.count === 0) {
         throw new ConfirmError("Este pedido ya no está pendiente de pago");
       }
-      // Nothing to flip on the seats themselves: their occupancy for this
-      // event is derived from this order's items and status (src/lib/seats.ts).
+
+      // Paid holds become permanent: HELD → SOLD, and the hold clock stops.
+      const tableIds = order.items
+        .map((item) => item.eventTableId)
+        .filter((tableId): tableId is string => tableId !== null);
+      const seatIds = order.items
+        .map((item) => item.eventSeatId)
+        .filter((seatId): seatId is string => seatId !== null);
+
+      if (tableIds.length > 0) {
+        await tx.eventTable.updateMany({
+          where: { id: { in: tableIds } },
+          data: { status: "SOLD", heldUntil: null },
+        });
+      }
+      if (seatIds.length > 0) {
+        await tx.eventSeat.updateMany({
+          where: { id: { in: seatIds } },
+          data: { status: "SOLD", heldUntil: null },
+        });
+      }
+
       await tx.ticket.createMany({ data: ticketsData });
     });
   } catch (err) {

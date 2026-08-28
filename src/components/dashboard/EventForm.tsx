@@ -37,7 +37,7 @@ export interface EventFormInitial {
   date: string;
   time: string;
   venueId: string;
-  price: string;
+  basePrice: string;
   coverImage: string | null;
   paymentQrImage: string | null;
 }
@@ -65,7 +65,7 @@ export function EventForm({
   const [date, setDate] = useState(initial?.date ?? "");
   const [time, setTime] = useState(initial?.time ?? "20:00");
   const [venueId, setVenueId] = useState(initial?.venueId ?? venues[0]?.id ?? "");
-  const [price, setPrice] = useState(initial?.price ?? "");
+  const [basePrice, setBasePrice] = useState(initial?.basePrice ?? "");
   const [coverImage, setCoverImage] = useState<string | null>(
     initial?.coverImage ?? null,
   );
@@ -93,7 +93,7 @@ export function EventForm({
       date,
       time,
       venueId,
-      price,
+      basePrice,
       coverImage,
       paymentQrImage,
     };
@@ -221,14 +221,13 @@ export function EventForm({
                 type="number"
                 min="1"
                 step="0.5"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
+                value={basePrice}
+                onChange={(e) => setBasePrice(e.target.value)}
                 placeholder="50"
                 required
               />
               <p className="text-xs text-muted-foreground">
-                El precio por zona se calcula multiplicando este precio por el
-                multiplicador de cada zona.
+                Es el precio con el que arranca cada zona del venue elegido.
               </p>
             </div>
           </CardContent>
