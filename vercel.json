@@ -2,8 +2,9 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
+      "comment": "Daily, not */5: Hobby plans only allow one run per day and a more frequent schedule fails the whole deployment. expireStaleOrders() also runs lazily before every order read/write, so this is only the backstop for when nobody is browsing. On a Pro plan this can go back to */5 * * * *.",
       "path": "/api/cron/expire-orders",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 7 * * *"
     }
   ]
 }
