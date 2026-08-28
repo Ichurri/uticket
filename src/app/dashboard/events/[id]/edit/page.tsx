@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { buttonVariants } from "@/components/ui/Button";
 import {
   EventForm,
   type EventFormInitial,
@@ -60,11 +62,19 @@ export default async function EditEventPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold">Editar evento</h1>
-        <p className="mt-1 text-muted-foreground">
-          Solo los eventos en borrador o en revisión pueden editarse.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Editar evento</h1>
+          <p className="mt-1 text-muted-foreground">
+            Solo los eventos en borrador o en revisión pueden editarse.
+          </p>
+        </div>
+        <Link
+          href={`/dashboard/events/${event.id}/pricing`}
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          Precios por zona
+        </Link>
       </div>
       <EventForm venues={venues} initial={initial} />
     </div>

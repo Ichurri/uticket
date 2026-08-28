@@ -121,7 +121,15 @@ export function EventForm({
       return;
     }
 
-    router.push("/dashboard/events");
+    // A brand new event goes straight to its prices: the base price is only a
+    // starting point and every zone still needs its own.
+    const data = await response.json().catch(() => null);
+    const created = data?.event?.id;
+    router.push(
+      initial || !created
+        ? "/dashboard/events"
+        : `/dashboard/events/${created}/pricing`,
+    );
     router.refresh();
   }
 
@@ -227,7 +235,8 @@ export function EventForm({
                 required
               />
               <p className="text-xs text-muted-foreground">
-                Es el precio con el que arranca cada zona del venue elegido.
+                Es el precio con el que arranca cada zona. Después le ponés uno
+                distinto a cada una en “Precios”.
               </p>
             </div>
           </CardContent>

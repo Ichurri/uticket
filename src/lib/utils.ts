@@ -43,6 +43,21 @@ export function salesAreClosed(
   return Date.now() > eventStartsAt(event).getTime() - cutoffHours * 3_600_000;
 }
 
+/**
+ * "2026-10-15T20:30" as typed into a `datetime-local` input, read as Bolivia
+ * time. The organizer types the hour on their own clock; the server may well
+ * be in UTC, so the offset is pinned rather than inferred.
+ */
+export function boliviaLocalToUtc(value: string) {
+  return new Date(`${value}:00-04:00`);
+}
+
+/** The reverse: a stored instant back into what `datetime-local` expects. */
+export function utcToBoliviaLocal(date: Date | string) {
+  const instant = typeof date === "string" ? new Date(date) : date;
+  return new Date(instant.getTime() - 4 * 3_600_000).toISOString().slice(0, 16);
+}
+
 /** All user-facing times are Bolivia time (fixed UTC-4) regardless of where
  * the server runs — Vercel renders in UTC, so formatters must pin this. */
 export const BOLIVIA_TZ = "America/La_Paz";

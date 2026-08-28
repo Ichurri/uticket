@@ -14,9 +14,11 @@ import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import {
   EyeIcon,
+  MapPinIcon,
   MicIcon,
   PencilIcon,
   SearchIcon,
+  TagIcon,
   TicketIcon,
 } from "@/components/ui/icons";
 import { EventActions } from "@/components/dashboard/EventActions";
@@ -60,6 +62,34 @@ function EventQuickLinks({
       >
         <TicketIcon className="h-4 w-4" />
       </Link>
+      {status !== "CANCELLED" && (
+        <Link
+          href={`/dashboard/events/${eventId}/map`}
+          aria-label={`Mapa en vivo de ${eventTitle}`}
+          title="Mapa en vivo"
+          className={buttonVariants({
+            variant: "ghost",
+            size: "md",
+            className: "w-9 px-0",
+          })}
+        >
+          <MapPinIcon className="h-4 w-4" />
+        </Link>
+      )}
+      {status !== "CANCELLED" && (
+        <Link
+          href={`/dashboard/events/${eventId}/pricing`}
+          aria-label={`Precios de ${eventTitle}`}
+          title="Precios"
+          className={buttonVariants({
+            variant: "ghost",
+            size: "md",
+            className: "w-9 px-0",
+          })}
+        >
+          <TagIcon className="h-4 w-4" />
+        </Link>
+      )}
       {editable && (
         <Link
           href={`/dashboard/events/${eventId}/edit`}
